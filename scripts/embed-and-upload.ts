@@ -7,6 +7,8 @@ import { openai } from "@ai-sdk/openai";
 const CHUNKS_PATH = join(process.cwd(), "data/qcs-chunks.json");
 const BATCH_SIZE = 100; // Embeddings per batch
 const UPSERT_BATCH_SIZE = 100; // Vectors per upsert call
+// Resume from this chunk index (set via env var START_FROM=10000)
+const START_FROM = parseInt(process.env.START_FROM || "0", 10);
 
 interface QCSChunk {
   id: string;
@@ -54,11 +56,15 @@ async function main() {
     `  Estimated total tokens: ${totalTokens.toLocaleString()} (~$${((totalTokens / 1_000_000) * 0.02).toFixed(2)} for embeddings)`
   );
 
+  if (START_FROM > 0) {
+    console.log(`  Resuming from chunk index ${START_FROM}`);
+  }
+
   console.log("\nStep 2: Generating embeddings and uploading to Upstash...");
-  let processed = 0;
+  let processed = START_FROM;
   let errors = 0;
 
-  for (let i = 0; i < chunks.length; i += BATCH_SIZE) {
+  for (let i = START_FROM; i < chunks.length; i += BATCH_SIZE) {
     const batch = chunks.slice(i, i + BATCH_SIZE);
 
     try {
