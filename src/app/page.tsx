@@ -3,16 +3,16 @@
 import { useChat } from "@ai-sdk/react";
 import { DefaultChatTransport } from "ai";
 import type { UIMessage } from "ai";
+import Image from "next/image";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
 import { ThemeToggle } from "@/components/theme-toggle";
+import {
+  DesktopSidebar,
+  MobileSidebar,
+} from "@/components/sidebar";
+import { useConversationHistory } from "@/hooks/use-conversation-history";
 import {
   Conversation,
   ConversationContent,
@@ -34,27 +34,46 @@ import {
   AttachmentRemove,
 } from "@/components/ai-elements/attachments";
 import {
+  Sources,
+  SourcesTrigger,
+  SourcesContent,
+  Source,
+} from "@/components/ai-elements/sources";
+import {
   PromptInput,
   PromptInputTextarea,
   PromptInputTools,
-  PromptInputActionMenu,
-  PromptInputActionMenuTrigger,
-  PromptInputActionMenuContent,
-  PromptInputActionAddAttachments,
+  PromptInputButton,
   PromptInputSubmit,
+  PromptInputHeader,
+  usePromptInputAttachments,
   type PromptInputMessage,
 } from "@/components/ai-elements/prompt-input";
 import { Shimmer } from "@/components/ai-elements/shimmer";
 import {
+  CheckCircleIcon,
+  XCircleIcon,
+  AlertTriangleIcon,
   ClipboardIcon,
   FileTextIcon,
   HardHatIcon,
   BuildingIcon,
+  PlusIcon,
+  PaperclipIcon,
+  SearchIcon,
+  MenuIcon,
 } from "lucide-react";
+
+const BRAND_LOGO_SRC = "/cb.svg";
+
+// ---------------------------------------------------------------------------
+// Sample submittals
+// ---------------------------------------------------------------------------
 
 const SAMPLE_SUBMITTALS = [
   {
     label: "Cement Submittal",
+    description: "Portland Cement Type I review",
     icon: <BuildingIcon className="h-4 w-4" />,
     text: `Please review the following construction submittal against QCS 2024 requirements:
 
@@ -83,6 +102,7 @@ Delivery Schedule: 500 tonnes/month over 10 months`,
   },
   {
     label: "Concrete Mix Design",
+    description: "Grade C40/20 mix review",
     icon: <HardHatIcon className="h-4 w-4" />,
     text: `Please review the following construction submittal against QCS 2024 requirements:
 
@@ -114,6 +134,7 @@ Trial Mix Results:
   },
   {
     label: "Waterproofing Membrane",
+    description: "Bituminous membrane review",
     icon: <FileTextIcon className="h-4 w-4" />,
     text: `Please review the following construction submittal against QCS 2024 requirements:
 
@@ -145,6 +166,7 @@ Surface Preparation: Clean, dry concrete surface, min 28 days cured`,
   },
   {
     label: "Steel Reinforcement",
+    description: "Deformed bars B500B review",
     icon: <BuildingIcon className="h-4 w-4" />,
     text: `Please review the following construction submittal against QCS 2024 requirements:
 
@@ -181,19 +203,79 @@ Storage: Covered storage area, raised off ground on timber bearers`,
   },
 ];
 
+// ---------------------------------------------------------------------------
+// Verdict helper
+// ---------------------------------------------------------------------------
+
+const VERDICT_CONFIG = {
+  APPROVED: {
+    label: "APPROVED",
+    className: "bg-emerald-500/10 text-emerald-600 border-emerald-500/20 dark:text-emerald-400",
+    icon: CheckCircleIcon,
+  },
+  REJECTED: {
+    label: "REJECTED",
+    className: "bg-red-500/10 text-red-600 border-red-500/20 dark:text-red-400",
+    icon: XCircleIcon,
+  },
+  "NEEDS REVISION": {
+    label: "NEEDS REVISION",
+    className: "bg-amber-500/10 text-amber-600 border-amber-500/20 dark:text-amber-400",
+    icon: AlertTriangleIcon,
+  },
+} as const;
+
 function getVerdictInfo(text: string) {
   const upper = text.toUpperCase();
   if (upper.includes("**APPROVED**") || /VERDICT[:\s]*\n?\s*\*{0,2}APPROVED/.test(upper)) {
-    return { label: "APPROVED", color: "bg-green-500/10 text-green-500 border-green-500/20" };
+    return VERDICT_CONFIG.APPROVED;
   }
   if (upper.includes("**REJECTED**") || /VERDICT[:\s]*\n?\s*\*{0,2}REJECTED/.test(upper)) {
-    return { label: "REJECTED", color: "bg-red-500/10 text-red-500 border-red-500/20" };
+    return VERDICT_CONFIG.REJECTED;
   }
   if (upper.includes("NEEDS REVISION")) {
-    return { label: "NEEDS REVISION", color: "bg-yellow-500/10 text-yellow-500 border-yellow-500/20" };
+    return VERDICT_CONFIG["NEEDS REVISION"];
   }
   return null;
 }
+
+// ---------------------------------------------------------------------------
+// Parse QCS sources from tool invocations
+// ---------------------------------------------------------------------------
+
+interface QCSSource {
+  reference: string;
+  score: number;
+}
+
+function parseQCSSources(message: UIMessage): QCSSource[] {
+  const sources: QCSSource[] = [];
+  for (const part of message.parts) {
+    if (part.type.startsWith("tool-") && "state" in part && part.state === "output-available") {
+      const result = (part as any).output;
+      if (Array.isArray(result)) {
+        for (const item of result) {
+          if (item.reference) {
+            sources.push({
+              reference: item.reference,
+              score: item.relevanceScore ?? 0,
+            });
+          }
+        }
+      }
+    }
+  }
+  const seen = new Set<string>();
+  return sources.filter((s) => {
+    if (seen.has(s.reference)) return false;
+    seen.add(s.reference);
+    return true;
+  });
+}
+
+// ---------------------------------------------------------------------------
+// ChatMessages component
+// ---------------------------------------------------------------------------
 
 function ChatMessages({ messages, status }: { messages: UIMessage[]; status: string }) {
   const isStreaming = status === "streaming";
@@ -206,15 +288,15 @@ function ChatMessages({ messages, status }: { messages: UIMessage[]; status: str
         const fullText = textParts
           .map((p) => (p as { type: "text"; text: string }).text)
           .join("");
-        const toolParts = message.parts.filter((p) => p.type === "tool-invocation");
+        const toolParts = message.parts.filter((p) => p.type.startsWith("tool-"));
         const fileParts = message.parts.filter((p) => p.type === "file");
         const verdict = !isUser ? getVerdictInfo(fullText) : null;
+        const qcsSources = !isUser ? parseQCSSources(message) : [];
         const isLastAssistant =
           !isUser && message.id === messages[messages.length - 1]?.id;
 
         return (
           <Message key={message.id} from={message.role}>
-            {/* Show attached files for user messages */}
             {isUser && fileParts.length > 0 && (
               <Attachments variant="grid">
                 {fileParts.map((part, idx) => (
@@ -231,26 +313,48 @@ function ChatMessages({ messages, status }: { messages: UIMessage[]; status: str
                 <div className="whitespace-pre-wrap">{fullText}</div>
               ) : (
                 <>
-                  {/* Tool usage indicator */}
                   {toolParts.length > 0 && (
-                    <div className="flex items-center gap-2 text-xs text-muted-foreground mb-2">
-                      <div className="h-1.5 w-1.5 bg-blue-500 rounded-full animate-pulse" />
-                      Searched QCS 2024 knowledge base ({toolParts.length}{" "}
-                      {toolParts.length === 1 ? "query" : "queries"})
+                    <div className="flex items-center gap-2 text-xs text-muted-foreground mb-3">
+                      <SearchIcon className="h-3 w-3" />
+                      <span>Searched QCS 2024 knowledge base</span>
                     </div>
                   )}
-                  {/* Verdict badge */}
+
+                  {qcsSources.length > 0 && (
+                    <Sources>
+                      <SourcesTrigger count={qcsSources.length}>
+                        <span className="font-medium">
+                          Used {qcsSources.length} QCS section{qcsSources.length !== 1 ? "s" : ""}
+                        </span>
+                        <svg className="h-3.5 w-3.5 transition-transform [[data-state=open]_&]:rotate-180" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m6 9 6 6 6-6"/></svg>
+                      </SourcesTrigger>
+                      <SourcesContent>
+                        {qcsSources.map((src, idx) => (
+                          <Source key={idx} href="#">
+                            <FileTextIcon className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                            <span className="text-xs">{src.reference}</span>
+                          </Source>
+                        ))}
+                      </SourcesContent>
+                    </Sources>
+                  )}
+
                   {verdict && (
                     <Badge
                       variant="outline"
-                      className={`mb-3 ${verdict.color}`}
+                      className={`mb-3 gap-1.5 ${verdict.className}`}
                     >
+                      <verdict.icon className="h-3.5 w-3.5" />
                       {verdict.label}
                     </Badge>
                   )}
-                  {/* Streaming or static response */}
+
                   {isLastAssistant && isStreaming ? (
-                    <MessageResponse>{fullText}</MessageResponse>
+                    fullText ? (
+                      <MessageResponse>{fullText}</MessageResponse>
+                    ) : (
+                      <Shimmer className="w-full">Analyzing submittal...</Shimmer>
+                    )
                   ) : fullText ? (
                     <MessageResponse>{fullText}</MessageResponse>
                   ) : (
@@ -260,7 +364,6 @@ function ChatMessages({ messages, status }: { messages: UIMessage[]; status: str
               )}
             </MessageContent>
 
-            {/* Copy action for assistant messages */}
             {!isUser && fullText && (
               <MessageActions>
                 <MessageAction
@@ -279,119 +382,316 @@ function ChatMessages({ messages, status }: { messages: UIMessage[]; status: str
   );
 }
 
+// ---------------------------------------------------------------------------
+// Inline attachment button (uses prompt-input context)
+// ---------------------------------------------------------------------------
+
+function AttachFileButton() {
+  const attachments = usePromptInputAttachments();
+  return (
+    <PromptInputButton
+      className="size-8 rounded-lg p-0"
+      tooltip="Attach files"
+      onClick={() => attachments.openFileDialog()}
+    >
+      <PaperclipIcon className="size-4" />
+    </PromptInputButton>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Inline attachment display for prompt input header
+// ---------------------------------------------------------------------------
+
+function PromptAttachments() {
+  const { files, remove } = usePromptInputAttachments();
+  if (files.length === 0) return null;
+
+  return (
+    <PromptInputHeader>
+      <Attachments variant="inline">
+        {files.map((file) => (
+          <Attachment key={file.id} data={file} onRemove={() => remove(file.id)}>
+            <AttachmentPreview />
+            <AttachmentInfo />
+            <AttachmentRemove />
+          </Attachment>
+        ))}
+      </Attachments>
+    </PromptInputHeader>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Main page
+// ---------------------------------------------------------------------------
+
 export default function Home() {
-  const { messages, sendMessage, status, stop } = useChat({
+  const { messages, setMessages, sendMessage, status, stop } = useChat({
     transport: new DefaultChatTransport({ api: "/api/chat" }),
   });
 
+  const history = useConversationHistory();
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [mobileSheetOpen, setMobileSheetOpen] = useState(false);
+
+  // Track whether we're switching conversations (skip auto-save during switch)
+  const switchingRef = useRef(false);
+  // Track previous message count to detect new messages
+  const prevMsgCountRef = useRef(0);
+
   const isLoading = status === "streaming" || status === "submitted";
+  const hasMessages = messages.length > 0;
 
-  const handleSubmit = (message: PromptInputMessage) => {
-    const text = message.text || "";
-    if (!text.trim() && (!message.files || message.files.length === 0)) return;
-    sendMessage({ text, files: message.files });
-  };
+  // Auto-save messages to active conversation
+  useEffect(() => {
+    if (switchingRef.current) return;
+    if (!history.activeId) return;
+    if (messages.length === 0) return;
+    // Only save when messages actually change
+    if (messages.length !== prevMsgCountRef.current || status === "ready") {
+      history.updateConversation(history.activeId, messages);
+    }
+    prevMsgCountRef.current = messages.length;
+  }, [messages, status, history.activeId]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const handleSampleClick = (text: string) => {
+  const handleSubmit = useCallback(
+    (message: PromptInputMessage) => {
+      const text = message.text || "";
+      if (!text.trim() && (!message.files || message.files.length === 0)) return;
+
+      // Create a conversation if none is active
+      if (!history.activeId) {
+        history.createConversation();
+      }
+
+      sendMessage({ text, files: message.files });
+    },
+    [history.activeId, history, sendMessage]
+  );
+
+  const handleSampleClick = useCallback(
+    (text: string) => {
+      if (isLoading) return;
+
+      if (!history.activeId) {
+        history.createConversation();
+      }
+
+      sendMessage({ text });
+    },
+    [isLoading, history.activeId, history, sendMessage]
+  );
+
+  const handleNewChat = useCallback(() => {
     if (isLoading) return;
-    sendMessage({ text });
+    switchingRef.current = true;
+    setMessages([]);
+    history.setActiveId(null);
+    prevMsgCountRef.current = 0;
+    // Allow auto-save again after state settles
+    requestAnimationFrame(() => {
+      switchingRef.current = false;
+    });
+  }, [isLoading, setMessages, history]);
+
+  const handleSelectConversation = useCallback(
+    (id: string) => {
+      if (isLoading) return;
+      if (id === history.activeId) return;
+      switchingRef.current = true;
+      const msgs = history.selectConversation(id);
+      setMessages(msgs ?? []);
+      prevMsgCountRef.current = (msgs ?? []).length;
+      requestAnimationFrame(() => {
+        switchingRef.current = false;
+      });
+    },
+    [isLoading, history, setMessages]
+  );
+
+  const handleDeleteConversation = useCallback(
+    (id: string) => {
+      const wasActive = id === history.activeId;
+      history.deleteConversation(id);
+      if (wasActive) {
+        switchingRef.current = true;
+        setMessages([]);
+        prevMsgCountRef.current = 0;
+        requestAnimationFrame(() => {
+          switchingRef.current = false;
+        });
+      }
+    },
+    [history, setMessages]
+  );
+
+  // Shared sidebar props
+  const sidebarProps = {
+    groups: history.groupedConversations,
+    activeId: history.activeId,
+    onSelect: handleSelectConversation,
+    onDelete: handleDeleteConversation,
+    onNewChat: handleNewChat,
   };
 
   return (
-    <div className="flex h-screen flex-col bg-background">
-      {/* Header */}
-      <header className="flex-none border-b bg-card/50 backdrop-blur-sm">
-        <div className="mx-auto flex max-w-4xl items-center justify-between px-4 py-3">
-          <div className="flex items-center gap-3">
-            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-primary-foreground">
-              <HardHatIcon className="h-4 w-4" />
-            </div>
-            <div>
-              <h1 className="text-base font-semibold leading-tight">
-                QCS Review Agent
-              </h1>
-              <p className="text-xs text-muted-foreground">
-                Qatar Construction Specifications 2024
-              </p>
-            </div>
-          </div>
-          <div className="flex items-center gap-2">
-            <Badge variant="outline" className="text-[10px] hidden sm:flex">
-              4,441 pages indexed
-            </Badge>
-            <ThemeToggle />
-          </div>
-        </div>
-      </header>
+    <div className="flex h-dvh bg-background">
+      {/* Desktop sidebar */}
+      <DesktopSidebar
+        collapsed={sidebarCollapsed}
+        onToggleCollapse={() => setSidebarCollapsed((c) => !c)}
+        {...sidebarProps}
+      />
 
-      {/* Chat Area */}
-      <Conversation className="flex-1 min-h-0">
-        <ConversationContent className="mx-auto max-w-4xl px-4 py-6">
-          {messages.length === 0 ? (
-            <div className="flex flex-col items-center justify-center h-full gap-8">
-              <ConversationEmptyState
-                icon={<HardHatIcon className="h-8 w-8 text-muted-foreground" />}
-                title="Construction Submittal Review"
-                description="Paste a material submittal, upload a PDF, or try a sample below. The agent reviews against QCS 2024 specifications and provides structured approval or rejection with citations."
-              />
-              <div className="grid w-full max-w-2xl grid-cols-1 gap-2 sm:grid-cols-2">
-                {SAMPLE_SUBMITTALS.map((sample) => (
-                  <Card
-                    key={sample.label}
-                    className="cursor-pointer transition-all hover:bg-accent/50 hover:shadow-sm"
-                    onClick={() => handleSampleClick(sample.text)}
-                  >
-                    <CardContent className="flex items-start gap-3 p-3">
-                      <div className="mt-0.5 text-muted-foreground">
-                        {sample.icon}
-                      </div>
-                      <div className="min-w-0">
-                        <p className="text-sm font-medium">{sample.label}</p>
-                        <p className="text-xs text-muted-foreground line-clamp-1">
-                          Review against QCS 2024
-                        </p>
-                      </div>
-                    </CardContent>
-                  </Card>
-                ))}
+      {/* Mobile sidebar */}
+      <MobileSidebar
+        open={mobileSheetOpen}
+        onOpenChange={setMobileSheetOpen}
+        {...sidebarProps}
+      />
+
+      {/* Main content */}
+      <div className="flex flex-1 flex-col min-w-0">
+        {/* Header */}
+        <header className="sticky top-0 z-10 flex-none border-b border-border/50 bg-background/80 backdrop-blur-sm">
+          <div className="mx-auto flex max-w-3xl items-center justify-between px-4 py-2.5">
+            <div className="flex items-center gap-2">
+              {/* Mobile hamburger */}
+              <Button
+                variant="ghost"
+                size="icon"
+                className="md:hidden h-8 w-8"
+                onClick={() => setMobileSheetOpen(true)}
+                aria-label="Open sidebar"
+              >
+                <MenuIcon className="h-4 w-4" />
+              </Button>
+
+              <div className="flex items-center gap-3">
+                <div className="relative flex h-8 w-8 items-center justify-center overflow-hidden rounded-lg bg-foreground/5 text-foreground">
+                  <Image
+                    src={BRAND_LOGO_SRC}
+                    alt="Construct Bot logo"
+                    fill
+                    sizes="32px"
+                    className="object-contain dark:invert"
+                    priority
+                  />
+                </div>
+                <div>
+                  <h1 className="text-sm font-semibold leading-tight">
+                    Construct Bot
+                  </h1>
+                  <p className="text-[11px] text-muted-foreground">
+                    QCS Review Agent
+                  </p>
+                </div>
               </div>
             </div>
-          ) : (
-            <ChatMessages messages={messages} status={status} />
-          )}
-        </ConversationContent>
-        <ConversationScrollButton />
-      </Conversation>
+            <div className="flex items-center gap-1.5">
+              <Badge variant="outline" className="text-[10px] hidden sm:flex font-normal text-muted-foreground">
+                4,441 pages indexed
+              </Badge>
+              {hasMessages && (
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={handleNewChat}
+                  disabled={isLoading}
+                  aria-label="New chat"
+                  className="h-8 w-8"
+                >
+                  <PlusIcon className="h-4 w-4" />
+                </Button>
+              )}
+              <ThemeToggle />
+            </div>
+          </div>
+        </header>
 
-      {/* Input Area */}
-      <div className="flex-none border-t bg-card/50 backdrop-blur-sm">
-        <div className="mx-auto max-w-4xl px-4 py-3">
-          <PromptInput
-            onSubmit={handleSubmit}
-            accept="application/pdf,text/plain,.doc,.docx"
-            multiple
-            maxFileSize={10 * 1024 * 1024}
-          >
-            <PromptInputTextarea
-              placeholder="Describe your construction submittal or upload a PDF..."
-              disabled={isLoading}
-            />
-            <PromptInputTools>
-              <PromptInputActionMenu>
-                <PromptInputActionMenuTrigger />
-                <PromptInputActionMenuContent>
-                  <PromptInputActionAddAttachments />
-                </PromptInputActionMenuContent>
-              </PromptInputActionMenu>
-              <PromptInputSubmit
-                status={status}
-                onStop={stop}
+        {/* Chat Area */}
+        <Conversation className="flex-1 min-h-0">
+          <ConversationContent className="mx-auto max-w-3xl px-4 py-6">
+            {!hasMessages ? (
+              <div className="flex flex-col items-center justify-center h-full gap-8 px-2">
+                <ConversationEmptyState
+                  icon={
+                    <span className="relative block h-10 w-10 overflow-hidden">
+                      <Image
+                        src={BRAND_LOGO_SRC}
+                        alt="Construct Bot logo"
+                        fill
+                        sizes="40px"
+                        className="object-contain opacity-50 dark:invert"
+                      />
+                    </span>
+                  }
+                  title="Construction Submittal Review"
+                  description="Paste a material submittal, upload a PDF, or try a sample below."
+                />
+
+                <div className="w-full max-w-2xl">
+                  <div className="flex gap-2 overflow-x-auto pb-2 snap-x snap-mandatory sm:grid sm:grid-cols-2 sm:overflow-x-visible sm:pb-0">
+                    {SAMPLE_SUBMITTALS.map((sample) => (
+                      <button
+                        key={sample.label}
+                        type="button"
+                        onClick={() => handleSampleClick(sample.text)}
+                        className="group flex-none w-[240px] snap-start rounded-lg border border-border/60 p-3 text-left transition-all hover:border-border hover:shadow-sm sm:w-auto sm:flex-auto"
+                      >
+                        <div className="flex items-start gap-2.5">
+                          <div className="mt-0.5 text-muted-foreground/70 group-hover:text-muted-foreground transition-colors">
+                            {sample.icon}
+                          </div>
+                          <div className="min-w-0">
+                            <p className="text-sm font-medium">{sample.label}</p>
+                            <p className="text-xs text-muted-foreground mt-0.5">
+                              {sample.description}
+                            </p>
+                          </div>
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <ChatMessages messages={messages} status={status} />
+            )}
+          </ConversationContent>
+          <ConversationScrollButton />
+        </Conversation>
+
+        {/* Input Area */}
+        <div className="sticky bottom-0 z-10 flex-none border-t border-border/50 bg-background/80 backdrop-blur-sm pb-[env(safe-area-inset-bottom)]">
+          <div className="mx-auto max-w-3xl px-4 py-3">
+            <PromptInput
+              onSubmit={handleSubmit}
+              accept="application/pdf,text/plain,.doc,.docx"
+              multiple
+              maxFileSize={10 * 1024 * 1024}
+              globalDrop
+            >
+              <PromptAttachments />
+              <PromptInputTextarea
+                placeholder="Describe submittal or upload PDF..."
+                disabled={isLoading}
+                className="min-h-11"
               />
-            </PromptInputTools>
-          </PromptInput>
-          <p className="mt-1.5 text-center text-[10px] text-muted-foreground">
-            Reviews submittals against 4,441 pages of QCS 2024 specifications
-          </p>
+              <PromptInputTools className="self-end items-center px-2 pb-2">
+                <AttachFileButton />
+                <PromptInputSubmit
+                  status={status}
+                  onStop={stop}
+                  className="size-8 rounded-lg p-0 bg-foreground text-background hover:bg-foreground/90"
+                />
+              </PromptInputTools>
+            </PromptInput>
+            <p className="mt-2 text-center text-[11px] text-muted-foreground">
+              Reviews submittals against 4,441 pages of QCS 2024 specifications
+            </p>
+          </div>
         </div>
       </div>
     </div>
