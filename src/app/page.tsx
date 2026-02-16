@@ -387,12 +387,12 @@ function ChatMessages({ messages, status }: { messages: UIMessage[]; status: str
 
                   {isLastAssistant && isStreaming ? (
                     fullText ? (
-                      <MessageResponse>{fullText}</MessageResponse>
+                      <MessageResponse className="agent-response">{fullText}</MessageResponse>
                     ) : (
                       <Shimmer className="w-full">Analyzing submittal...</Shimmer>
                     )
                   ) : fullText ? (
-                    <MessageResponse>{fullText}</MessageResponse>
+                    <MessageResponse className="agent-response">{fullText}</MessageResponse>
                   ) : (
                     <Shimmer className="w-full">Reviewing submittal against QCS 2024...</Shimmer>
                   )}
@@ -465,7 +465,7 @@ function PromptAttachments() {
 type RagMode = "vector" | "graph";
 
 export default function Home() {
-  const [ragMode, setRagMode] = useState<RagMode>("vector");
+  const [ragMode, setRagMode] = useState<RagMode>("graph");
   const ragModeRef = useRef<RagMode>(ragMode);
 
   // Keep ref in sync with state
@@ -738,7 +738,7 @@ export default function Home() {
               <PromptInputTools className="self-end items-center px-2 pb-2">
                 <AttachFileButton />
                 <Select value={ragMode} onValueChange={(v: RagMode) => setRagMode(v)}>
-                  <SelectTrigger className="h-8 w-auto gap-1.5 rounded-lg border-none bg-muted/60 px-2.5 text-xs font-medium text-muted-foreground shadow-none transition-colors hover:bg-muted hover:text-foreground">
+                  <SelectTrigger className="h-8 w-auto gap-1.5 border-none bg-transparent dark:bg-transparent px-2 text-xs font-medium text-muted-foreground shadow-none hover:bg-accent hover:text-accent-foreground dark:hover:bg-accent/50 focus-visible:border-none focus-visible:ring-0">
                     {ragMode === "vector" ? (
                       <DatabaseIcon className="h-3.5 w-3.5" />
                     ) : (
@@ -747,14 +747,8 @@ export default function Home() {
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent position="popper" side="top" sideOffset={8} className="max-h-none overflow-visible [&_[data-radix-select-viewport]]:h-auto">
-                    <SelectItem value="vector">
-                      <DatabaseIcon className="h-3.5 w-3.5 mr-2 inline-block" />
-                      Vector RAG
-                    </SelectItem>
-                    <SelectItem value="graph">
-                      <NetworkIcon className="h-3.5 w-3.5 mr-2 inline-block" />
-                      Graph RAG
-                    </SelectItem>
+                    <SelectItem value="vector">Vector RAG</SelectItem>
+                    <SelectItem value="graph">Graph RAG</SelectItem>
                   </SelectContent>
                 </Select>
                 <PromptInputSubmit

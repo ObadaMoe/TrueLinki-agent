@@ -142,3 +142,280 @@
     background: oklch(0.5 0 0 / 35%);
   }
 }
+
+/* ─── Agent Response: Enhanced Markdown ─── */
+
+.agent-response {
+  font-size: 0.9rem;
+  line-height: 1.7;
+  color: var(--foreground);
+}
+
+/* ── Headings ── */
+
+.agent-response h1,
+.agent-response h2,
+.agent-response h3,
+.agent-response h4 {
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  margin-top: 1.75em;
+  margin-bottom: 0.6em;
+  color: var(--foreground);
+}
+
+.agent-response h1 {
+  font-size: 1.35rem;
+}
+
+.agent-response h2 {
+  font-size: 1.15rem;
+}
+
+.agent-response h3 {
+  font-size: 1.05rem;
+  padding-bottom: 0.45em;
+  border-bottom: 1px solid var(--border);
+}
+
+.agent-response h4 {
+  font-size: 0.95rem;
+  font-weight: 600;
+}
+
+/* First heading in the response shouldn't have top margin */
+.agent-response > h1:first-child,
+.agent-response > h2:first-child,
+.agent-response > h3:first-child {
+  margin-top: 0;
+}
+
+/* ── Paragraphs ── */
+
+.agent-response p {
+  margin-top: 0.5em;
+  margin-bottom: 0.5em;
+}
+
+/* ── Strong / Bold ── */
+
+.agent-response strong {
+  font-weight: 650;
+  color: var(--foreground);
+}
+
+/* ── Emphasis ── */
+
+.agent-response em {
+  font-style: italic;
+  color: var(--muted-foreground);
+}
+
+/* ── Lists ── */
+
+.agent-response ul {
+  list-style: none;
+  padding-left: 0;
+  margin-top: 0.5em;
+  margin-bottom: 0.5em;
+}
+
+.agent-response ul li {
+  position: relative;
+  padding-left: 1.5em;
+  margin-bottom: 0.4em;
+  line-height: 1.65;
+}
+
+.agent-response ul li::before {
+  content: "";
+  position: absolute;
+  left: 0.15em;
+  top: 0.6em;
+  width: 6px;
+  height: 6px;
+  border-radius: 1.5px;
+  background: var(--primary);
+  opacity: 0.55;
+}
+
+/* Nested list — dimmer square bullets */
+.agent-response ul ul li::before {
+  width: 5px;
+  height: 5px;
+  border-radius: 0;
+  opacity: 0.35;
+}
+
+.agent-response ol {
+  padding-left: 1.5em;
+  margin-top: 0.5em;
+  margin-bottom: 0.5em;
+  counter-reset: ol-counter;
+  list-style: none;
+}
+
+.agent-response ol > li {
+  position: relative;
+  padding-left: 0.4em;
+  margin-bottom: 0.4em;
+  counter-increment: ol-counter;
+  line-height: 1.65;
+}
+
+.agent-response ol > li::before {
+  content: counter(ol-counter) ".";
+  position: absolute;
+  left: -1.5em;
+  font-weight: 600;
+  font-size: 0.85em;
+  color: var(--muted-foreground);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Nested ol inside ol — use dash markers instead of numbers */
+.agent-response ol ol {
+  padding-left: 0.25em;
+  list-style: none;
+  counter-reset: none;
+}
+
+.agent-response ol ol > li {
+  padding-left: 1.25em;
+  counter-increment: none;
+}
+
+.agent-response ol ol > li::before {
+  content: "–";
+  left: 0;
+  font-weight: 400;
+  font-size: 1em;
+  opacity: 0.4;
+}
+
+/* Nested ul inside ol — bullet points */
+.agent-response ol ul {
+  padding-left: 0.25em;
+}
+
+.agent-response ol ul li {
+  padding-left: 1.25em;
+}
+
+.agent-response ol ul li::before {
+  left: 0;
+  top: 0.6em;
+  width: 5px;
+  height: 5px;
+  border-radius: 0;
+  opacity: 0.35;
+}
+
+/* ── Horizontal Rule (section separator) ── */
+
+.agent-response hr {
+  border: none;
+  height: 1px;
+  background: var(--border);
+  margin: 1.5em 0;
+}
+
+/* ── Blockquotes (citations / notes) ── */
+
+.agent-response blockquote {
+  border-left: 3px solid var(--primary);
+  padding: 0.5em 1em;
+  margin: 0.75em 0;
+  background: oklch(from var(--muted) l c h / 50%);
+  border-radius: 0 0.375rem 0.375rem 0;
+  font-size: 0.88rem;
+  color: var(--muted-foreground);
+}
+
+.agent-response blockquote p {
+  margin: 0.25em 0;
+}
+
+/* ── Inline Code ── */
+
+.agent-response code:not(pre code) {
+  font-size: 0.82em;
+  padding: 0.15em 0.4em;
+  border-radius: 0.25rem;
+  background: var(--muted);
+  color: var(--foreground);
+  font-weight: 500;
+}
+
+/* ── Code Blocks ── */
+
+.agent-response pre {
+  background: var(--muted);
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+  padding: 1em;
+  margin: 0.75em 0;
+  overflow-x: auto;
+  font-size: 0.82rem;
+  line-height: 1.6;
+}
+
+/* ── Tables ── */
+
+.agent-response table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 0.75em 0;
+  font-size: 0.85rem;
+}
+
+.agent-response th {
+  text-align: left;
+  font-weight: 650;
+  padding: 0.55em 0.75em;
+  border-bottom: 2px solid var(--border);
+  color: var(--foreground);
+  font-size: 0.82rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.agent-response td {
+  padding: 0.5em 0.75em;
+  border-bottom: 1px solid var(--border);
+  color: var(--foreground);
+}
+
+.agent-response tbody tr:last-child td {
+  border-bottom: none;
+}
+
+/* ── Links ── */
+
+.agent-response a {
+  color: var(--primary);
+  text-decoration-line: underline;
+  text-underline-offset: 2px;
+  text-decoration-color: oklch(from var(--primary) l c h / 35%);
+  transition: text-decoration-color 150ms;
+}
+
+.agent-response a:hover {
+  text-decoration-color: var(--primary);
+}
+
+/* ── Dark mode refinements ── */
+
+.dark .agent-response ul li::before {
+  opacity: 0.45;
+  background: var(--muted-foreground);
+}
+
+.dark .agent-response ul ul li::before {
+  opacity: 0.25;
+}
+
+.dark .agent-response blockquote {
+  background: oklch(from var(--muted) l c h / 40%);
+  border-left-color: var(--muted-foreground);
+}
