@@ -4,7 +4,7 @@ import { useChat } from "@ai-sdk/react";
 import { DefaultChatTransport } from "ai";
 import type { UIMessage } from "ai";
 import Image from "next/image";
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ThemeToggle } from "@/components/theme-toggle";
@@ -51,6 +51,13 @@ import {
 } from "@/components/ai-elements/prompt-input";
 import { Shimmer } from "@/components/ai-elements/shimmer";
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
   CheckCircleIcon,
   XCircleIcon,
   AlertTriangleIcon,
@@ -62,6 +69,8 @@ import {
   PaperclipIcon,
   SearchIcon,
   MenuIcon,
+  NetworkIcon,
+  DatabaseIcon,
 } from "lucide-react";
 
 const BRAND_LOGO_SRC = "/cb.svg";
@@ -246,6 +255,7 @@ function getVerdictInfo(text: string) {
 interface QCSSource {
   reference: string;
   score: number;
+  source: "vector" | "graph";
 }
 
 function parseQCSSources(message: UIMessage): QCSSource[] {
@@ -259,6 +269,7 @@ function parseQCSSources(message: UIMessage): QCSSource[] {
             sources.push({
               reference: item.reference,
               score: item.relevanceScore ?? 0,
+              source: item.source === "graph" ? "graph" : "vector",
             });
           }
         }
@@ -313,12 +324,28 @@ function ChatMessages({ messages, status }: { messages: UIMessage[]; status: str
                 <div className="whitespace-pre-wrap">{fullText}</div>
               ) : (
                 <>
-                  {toolParts.length > 0 && (
-                    <div className="flex items-center gap-2 text-xs text-muted-foreground mb-3">
-                      <SearchIcon className="h-3 w-3" />
-                      <span>Searched QCS 2024 knowledge base</span>
-                    </div>
-                  )}
+                  {toolParts.length > 0 && (() => {
+                    const graphCount = qcsSources.filter((s) => s.source === "graph").length;
+                    const hasGraphSources = graphCount > 0;
+                    return (
+                      <div className="flex items-center gap-2 text-xs text-muted-foreground mb-3">
+                        {hasGraphSources ? (
+                          <NetworkIcon className="h-3 w-3" />
+                        ) : (
+                          <SearchIcon className="h-3 w-3" />
+                        )}
+                        <span>
+                          Searched QCS 2024 knowledge base
+                          {hasGraphSources && (
+                            <span className="ml-1.5 inline-flex items-center gap-1 rounded-full bg-violet-500/10 px-1.5 py-0.5 text-[10px] font-medium text-violet-600 dark:text-violet-400">
+                              <NetworkIcon className="h-2.5 w-2.5" />
+                              Graph +{graphCount}
+                            </span>
+                          )}
+                        </span>
+                      </div>
+                    );
+                  })()}
 
                   {qcsSources.length > 0 && (
                     <Sources>
@@ -331,8 +358,17 @@ function ChatMessages({ messages, status }: { messages: UIMessage[]; status: str
                       <SourcesContent>
                         {qcsSources.map((src, idx) => (
                           <Source key={idx} href="#">
-                            <FileTextIcon className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                            {src.source === "graph" ? (
+                              <NetworkIcon className="h-3.5 w-3.5 shrink-0 text-violet-500" />
+                            ) : (
+                              <FileTextIcon className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                            )}
                             <span className="text-xs">{src.reference}</span>
+                            {src.source === "graph" && (
+                              <span className="ml-auto shrink-0 rounded-full bg-violet-500/10 px-1.5 py-0.5 text-[10px] font-medium text-violet-600 dark:text-violet-400">
+                                graph
+                              </span>
+                            )}
                           </Source>
                         ))}
                       </SourcesContent>
@@ -426,9 +462,29 @@ function PromptAttachments() {
 // Main page
 // ---------------------------------------------------------------------------
 
+type RagMode = "vector" | "graph";
+
 export default function Home() {
+  const [ragMode, setRagMode] = useState<RagMode>("vector");
+  const ragModeRef = useRef<RagMode>(ragMode);
+
+  // Keep ref in sync with state
+  useEffect(() => {
+    ragModeRef.current = ragMode;
+  }, [ragMode]);
+
+  // Use a stable transport that reads ragMode from ref
+  const transport = useMemo(
+    () =>
+      new DefaultChatTransport({
+        api: "/api/chat",
+        body: () => ({ ragMode: ragModeRef.current }),
+      }),
+    []
+  );
+
   const { messages, setMessages, sendMessage, status, stop } = useChat({
-    transport: new DefaultChatTransport({ api: "/api/chat" }),
+    transport,
   });
 
   const history = useConversationHistory();
@@ -681,6 +737,20 @@ export default function Home() {
               />
               <PromptInputTools className="self-end items-center px-2 pb-2">
                 <AttachFileButton />
+                <Select value={ragMode} onValueChange={(v: RagMode) => setRagMode(v)}>
+                  <SelectTrigger className="h-8 w-auto gap-1.5 border-none bg-transparent px-2 text-xs font-medium text-muted-foreground shadow-none hover:bg-accent hover:text-foreground">
+                    {ragMode === "vector" ? (
+                      <DatabaseIcon className="h-3.5 w-3.5" />
+                    ) : (
+                      <NetworkIcon className="h-3.5 w-3.5" />
+                    )}
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="vector">Vector RAG</SelectItem>
+                    <SelectItem value="graph">Graph RAG</SelectItem>
+                  </SelectContent>
+                </Select>
                 <PromptInputSubmit
                   status={status}
                   onStop={stop}

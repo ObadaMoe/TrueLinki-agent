@@ -7,9 +7,11 @@ import {
 } from "ai";
 import { openai } from "@ai-sdk/openai";
 import { z } from "zod";
-import { searchQCS } from "@/lib/vector-store";
+import { searchQCS, hybridSearch } from "@/lib/vector-store";
 
 export const maxDuration = 60;
+
+type RagMode = "vector" | "graph";
 
 const SYSTEM_PROMPT = `You are a Construction Submittal Review Agent specializing in Qatar Construction Specifications (QCS 2024). Your role is to review construction submittals and determine whether they comply with QCS 2024 requirements.
 
@@ -48,7 +50,12 @@ If rejected or needs revision, provide specific actionable recommendations.
 - If you are unsure about a requirement, say so rather than guessing`;
 
 export async function POST(req: Request) {
-  const { messages }: { messages: UIMessage[] } = await req.json();
+  const {
+    messages,
+    ragMode = "vector",
+  }: { messages: UIMessage[]; ragMode?: RagMode } = await req.json();
+
+  const useGraphRAG = ragMode === "graph";
 
   const result = streamText({
     model: openai("gpt-4o"),
@@ -67,11 +74,15 @@ export async function POST(req: Request) {
             ),
         }),
         execute: async ({ query }) => {
-          const results = await searchQCS(query, 8);
+          const results = useGraphRAG
+            ? await hybridSearch(query, 8, 2, 12)
+            : await searchQCS(query, 8);
+
           return results.map((r) => ({
             reference: `QCS 2024 Section ${r.sectionNumber}: ${r.sectionTitle}, Part ${r.partNumber}: ${r.partTitle}, Clause ${r.clauseNumber}: ${r.clauseTitle} (Pages ${r.pageStart}-${r.pageEnd})`,
             content: r.content,
             relevanceScore: r.score,
+            source: r.score < 0.6 ? "graph" : "vector",
           }));
         },
       }),

@@ -1,6 +1,7 @@
 import { Index } from "@upstash/vector";
 import { embed } from "ai";
 import { openai } from "@ai-sdk/openai";
+import { getEntitiesForChunks, traverseGraph } from "./graph-store";
 
 const index = new Index({
   url: process.env.UPSTASH_VECTOR_REST_URL!,
@@ -23,6 +24,9 @@ export interface QCSSearchResult {
   content: string;
 }
 
+/**
+ * Standard vector similarity search against Upstash Vector.
+ */
 export async function searchQCS(
   query: string,
   topK: number = 8
@@ -53,4 +57,81 @@ export async function searchQCS(
       pageEnd: (r.metadata as any).pageEnd || 0,
       content: (r.metadata as any).content || "",
     }));
+}
+
+/**
+ * Hybrid search: vector similarity + graph traversal.
+ * 1. Vector search for top-K chunks
+ * 2. Look up entities for those chunks in Redis graph
+ * 3. Traverse graph 1-2 hops to find related chunks
+ * 4. Fetch content for graph-discovered chunks from Upstash Vector by ID
+ * 5. Return merged, deduplicated results (vector first, then graph)
+ */
+export async function hybridSearch(
+  query: string,
+  topK: number = 8,
+  graphHops: number = 2,
+  maxGraphChunks: number = 12
+): Promise<QCSSearchResult[]> {
+  // Step 1: Standard vector search
+  const vectorResults = await searchQCS(query, topK);
+
+  // Step 2: Get entities from vector result chunks
+  const vectorChunkIds = vectorResults.map((r) => r.id);
+  let entityIds: string[];
+
+  try {
+    entityIds = await getEntitiesForChunks(vectorChunkIds);
+  } catch {
+    // If Redis is unavailable, fall back to vector-only results
+    console.warn("Graph store unavailable, returning vector-only results");
+    return vectorResults;
+  }
+
+  if (entityIds.length === 0) {
+    // No graph data for these chunks; return vector results only
+    return vectorResults;
+  }
+
+  // Step 3: Traverse graph
+  const graphChunkIds = await traverseGraph(
+    entityIds,
+    graphHops,
+    maxGraphChunks
+  );
+
+  // Step 4: Filter out chunks we already have from vector search
+  const existingIds = new Set(vectorChunkIds);
+  const newChunkIds = graphChunkIds.filter((id) => !existingIds.has(id));
+
+  if (newChunkIds.length === 0) {
+    return vectorResults;
+  }
+
+  // Step 5: Fetch content for new chunks from Upstash Vector by ID
+  const fetched = await index.fetch(newChunkIds, {
+    includeMetadata: true,
+  });
+
+  const graphResults: QCSSearchResult[] = [];
+  for (const item of fetched) {
+    if (!item || !item.metadata) continue;
+    const meta = item.metadata as Record<string, unknown>;
+    graphResults.push({
+      id: item.id as string,
+      score: 0.5, // Synthetic score for graph-discovered results
+      sectionNumber: (meta.sectionNumber as string) || "",
+      sectionTitle: (meta.sectionTitle as string) || "",
+      partNumber: (meta.partNumber as string) || "",
+      partTitle: (meta.partTitle as string) || "",
+      clauseNumber: (meta.clauseNumber as string) || "",
+      clauseTitle: (meta.clauseTitle as string) || "",
+      pageStart: (meta.pageStart as number) || 0,
+      pageEnd: (meta.pageEnd as number) || 0,
+      content: (meta.content as string) || "",
+    });
+  }
+
+  // Step 6: Merge — vector results first (higher confidence), then graph
+  return [...vectorResults, ...graphResults];
 }
