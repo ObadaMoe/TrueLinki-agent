@@ -1,4 +1,5 @@
-import { extractText, getDocumentProxy, renderPageAsImage } from "unpdf";
+import { extractText, getDocumentProxy } from "unpdf";
+import { createCanvas } from "@napi-rs/canvas";
 
 export interface ExtractedPage {
   pageNumber: number;
@@ -11,39 +12,71 @@ export interface PDFExtractionResult {
   totalPages: number;
   rawText: string;
   filename?: string;
+  isScanned: boolean;
 }
 
 const MAX_TEXT_CHARS = 50_000;
 
 /**
+ * Custom CanvasFactory for pdfjs-dist that uses @napi-rs/canvas.
+ * Required because unpdf's bundled pdfjs stubs out @napi-rs/canvas.
+ */
+class NodeCanvasFactory {
+  create(width: number, height: number) {
+    const canvas = createCanvas(width, height);
+    return { canvas, context: canvas.getContext("2d") };
+  }
+  reset(
+    canvasAndContext: { canvas: any; context: any },
+    width: number,
+    height: number
+  ) {
+    canvasAndContext.canvas.width = width;
+    canvasAndContext.canvas.height = height;
+  }
+  destroy(canvasAndContext: { canvas: any; context: any }) {
+    canvasAndContext.canvas = null;
+    canvasAndContext.context = null;
+  }
+}
+
+/**
  * Select which pages to render as images for visual analysis.
- * Prioritizes: first 3 pages (cover/DRS), last 2 pages (certs/signatures),
- * and pages with short text (likely tables, stamps, images).
+ *
+ * For scanned PDFs (no extractable text), render ALL pages up to maxPages.
+ * For text-based PDFs, prioritize cover pages, cert pages, and pages with
+ * short text (likely tables, stamps, images).
  */
 function selectPagesForImages(
   pageTexts: string[],
-  maxPages: number
+  maxPages: number,
+  isScanned: boolean
 ): number[] {
+  if (isScanned) {
+    const all: number[] = [];
+    for (let i = 1; i <= Math.min(pageTexts.length, maxPages); i++) {
+      all.push(i);
+    }
+    return all;
+  }
+
   const selected = new Set<number>();
 
-  // First 3 pages (cover sheet, DRS form, intro)
   for (let i = 1; i <= Math.min(3, pageTexts.length); i++) {
     selected.add(i);
   }
 
-  // Last 2 pages (certificates, signatures)
   for (let i = Math.max(1, pageTexts.length - 1); i <= pageTexts.length; i++) {
     selected.add(i);
   }
 
-  // Pages with short text (likely tables/images/stamps that text extraction missed)
   if (pageTexts.length > 0) {
     const avgLen =
       pageTexts.reduce((s, t) => s + t.length, 0) / pageTexts.length;
     for (let i = 0; i < pageTexts.length; i++) {
       if (selected.size >= maxPages) break;
-      if (pageTexts[i].length < avgLen * 0.3 && pageTexts[i].length > 0) {
-        selected.add(i + 1); // 1-indexed
+      if (pageTexts[i].length < avgLen * 0.3) {
+        selected.add(i + 1);
       }
     }
   }
@@ -51,6 +84,27 @@ function selectPagesForImages(
   return Array.from(selected)
     .sort((a, b) => a - b)
     .slice(0, maxPages);
+}
+
+/**
+ * Render a single PDF page to a PNG data URL using pdfjs-dist directly
+ * with @napi-rs/canvas (bypasses unpdf's broken bundled canvas factory).
+ */
+async function renderPage(
+  pdf: any,
+  pageNum: number,
+  scale: number
+): Promise<string> {
+  const page = await pdf.getPage(pageNum);
+  const viewport = page.getViewport({ scale });
+
+  const width = Math.floor(viewport.width);
+  const height = Math.floor(viewport.height);
+  const canvas = createCanvas(width, height);
+  const ctx = canvas.getContext("2d");
+
+  await page.render({ canvasContext: ctx, viewport }).promise;
+  return canvas.toDataURL("image/png");
 }
 
 /**
@@ -64,46 +118,57 @@ export async function extractPDF(
     filename?: string;
   }
 ): Promise<PDFExtractionResult> {
-  const maxImagePages = options?.maxImagePages ?? 8;
+  const maxImagePages = options?.maxImagePages ?? 10;
   const imageScale = options?.imageScale ?? 1.5;
   const filename = options?.filename;
 
   // Parse data URL to Uint8Array
-  const base64Match = dataUrl.match(
-    /^data:application\/pdf;base64,(.+)$/
-  );
+  const base64Match = dataUrl.match(/^data:application\/pdf;base64,(.+)$/);
   if (!base64Match) {
     throw new Error("Invalid PDF data URL");
   }
-  const pdfBytes = new Uint8Array(
-    Buffer.from(base64Match[1], "base64")
-  );
+  const pdfBytes = new Uint8Array(Buffer.from(base64Match[1], "base64"));
 
-  // Get document proxy
+  // Get document proxy (uses unpdf's pdfjs for text extraction — works fine)
   const pdf = await getDocumentProxy(pdfBytes, { verbosity: 0 });
 
   // Extract text from all pages
   const { text: pageTexts } = await extractText(pdf, { mergePages: false });
 
+  // Detect scanned/image-based PDF
+  const totalTextLength = pageTexts.reduce((s, t) => s + t.length, 0);
+  const isScanned = totalTextLength < 100;
+
   // Select pages for image rendering
-  const imagePagesNumbers = selectPagesForImages(pageTexts, maxImagePages);
+  const imagePagesNumbers = selectPagesForImages(
+    pageTexts,
+    maxImagePages,
+    isScanned
+  );
+
+  // Load PDF again with pdfjs-dist directly for rendering (with custom canvas factory)
+  const pdfjsLib = await import("pdfjs-dist/legacy/build/pdf.mjs");
+  const renderPdf = await pdfjsLib
+    .getDocument({
+      data: pdfBytes.slice(),
+      verbosity: 0,
+      canvasFactory: new NodeCanvasFactory() as any,
+    } as any)
+    .promise;
 
   // Render selected pages as images
   const imageMap = new Map<number, string>();
   for (const pageNum of imagePagesNumbers) {
     try {
-      const dataUrlResult = await renderPageAsImage(pdf, pageNum, {
-        scale: imageScale,
-        toDataURL: true,
-      });
-      imageMap.set(pageNum, dataUrlResult);
+      const imgDataUrl = await renderPage(renderPdf, pageNum, imageScale);
+      imageMap.set(pageNum, imgDataUrl);
     } catch (err) {
       console.warn(`Failed to render page ${pageNum} as image:`, err);
-      // Continue with other pages
     }
   }
 
   await pdf.destroy();
+  renderPdf.destroy();
 
   // Build pages array
   const pages: ExtractedPage[] = pageTexts.map((text, idx) => ({
@@ -112,15 +177,22 @@ export async function extractPDF(
     imageDataUrl: imageMap.get(idx + 1),
   }));
 
-  // Build raw text with truncation if needed
-  let rawText = pageTexts
-    .map((text, idx) => `--- PAGE ${idx + 1} ---\n${text}`)
-    .join("\n\n");
-
-  if (rawText.length > MAX_TEXT_CHARS) {
+  // Build raw text
+  let rawText: string;
+  if (isScanned) {
     rawText =
-      rawText.slice(0, MAX_TEXT_CHARS) +
-      "\n\n[... text truncated due to length ...]";
+      `[This is a scanned/image-based PDF with ${pageTexts.length} pages. ` +
+      `Text extraction returned no content. Analysis relies entirely on page images.]`;
+  } else {
+    rawText = pageTexts
+      .map((text, idx) => `--- PAGE ${idx + 1} ---\n${text}`)
+      .join("\n\n");
+
+    if (rawText.length > MAX_TEXT_CHARS) {
+      rawText =
+        rawText.slice(0, MAX_TEXT_CHARS) +
+        "\n\n[... text truncated due to length ...]";
+    }
   }
 
   return {
@@ -128,5 +200,6 @@ export async function extractPDF(
     totalPages: pageTexts.length,
     rawText,
     filename,
+    isScanned,
   };
 }
