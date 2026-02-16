@@ -327,22 +327,33 @@ function ChatMessages({ messages, status }: { messages: UIMessage[]; status: str
                   {toolParts.length > 0 && (() => {
                     const graphCount = qcsSources.filter((s) => s.source === "graph").length;
                     const hasGraphSources = graphCount > 0;
+                    const hasAnalysisTool = toolParts.some(
+                      (p) => (p as any).toolName === "analyzeSubmittal"
+                    );
                     return (
-                      <div className="flex items-center gap-2 text-xs text-muted-foreground mb-3">
-                        {hasGraphSources ? (
-                          <NetworkIcon className="h-3 w-3" />
-                        ) : (
-                          <SearchIcon className="h-3 w-3" />
+                      <div className="flex flex-col gap-1.5 mb-3">
+                        {hasAnalysisTool && (
+                          <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                            <FileTextIcon className="h-3 w-3" />
+                            <span>Analyzed PDF submittal document</span>
+                          </div>
                         )}
-                        <span>
-                          Searched QCS 2024 knowledge base
-                          {hasGraphSources && (
-                            <span className="ml-1.5 inline-flex items-center gap-1 rounded-full bg-violet-500/10 px-1.5 py-0.5 text-[10px] font-medium text-violet-600 dark:text-violet-400">
-                              <NetworkIcon className="h-2.5 w-2.5" />
-                              Graph +{graphCount}
-                            </span>
+                        <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                          {hasGraphSources ? (
+                            <NetworkIcon className="h-3 w-3" />
+                          ) : (
+                            <SearchIcon className="h-3 w-3" />
                           )}
-                        </span>
+                          <span>
+                            Searched QCS 2024 knowledge base
+                            {hasGraphSources && (
+                              <span className="ml-1.5 inline-flex items-center gap-1 rounded-full bg-violet-500/10 px-1.5 py-0.5 text-[10px] font-medium text-violet-600 dark:text-violet-400">
+                                <NetworkIcon className="h-2.5 w-2.5" />
+                                Graph +{graphCount}
+                              </span>
+                            )}
+                          </span>
+                        </div>
                       </div>
                     );
                   })()}
@@ -388,9 +399,20 @@ function ChatMessages({ messages, status }: { messages: UIMessage[]; status: str
                   {isLastAssistant && isStreaming ? (
                     fullText ? (
                       <MessageResponse className="agent-response">{fullText}</MessageResponse>
-                    ) : (
-                      <Shimmer className="w-full">Analyzing submittal...</Shimmer>
-                    )
+                    ) : (() => {
+                      const hasAnalyzing = toolParts.some(
+                        (p) => (p as any).toolName === "analyzeSubmittal"
+                      );
+                      const hasSearching = toolParts.some(
+                        (p) => (p as any).toolName === "retrieveQCSSpecs"
+                      );
+                      const label = hasSearching
+                        ? "Comparing against QCS 2024 specifications..."
+                        : hasAnalyzing
+                          ? "Extracting document structure..."
+                          : "Analyzing submittal...";
+                      return <Shimmer className="w-full">{label}</Shimmer>;
+                    })()
                   ) : fullText ? (
                     <MessageResponse className="agent-response">{fullText}</MessageResponse>
                   ) : (
@@ -726,7 +748,7 @@ export default function Home() {
               onSubmit={handleSubmit}
               accept="application/pdf,text/plain,.doc,.docx"
               multiple
-              maxFileSize={10 * 1024 * 1024}
+              maxFileSize={25 * 1024 * 1024}
               globalDrop
             >
               <PromptAttachments />

@@ -1,0 +1,176 @@
+import { generateObject } from "ai";
+import { openai } from "@ai-sdk/openai";
+import { z } from "zod";
+import type { PDFExtractionResult } from "./pdf-extract";
+
+const ANALYSIS_PROMPT = `You are a construction document analyst specializing in Qatar construction projects. Analyze the provided submittal document and extract structured information.
+
+## Document Types You May Encounter
+- **Material Submittal Approval (MAR)**: Cover sheet with material details, manufacturer, supplier
+- **Document Review Sheet (DRS)**: Table with reviewer comments, contractor responses, and compliance status (Complied/Not Complied/Excluded/Noted)
+- **Pre-Qualification Documents**: Contractor/supplier qualification forms
+- **Test Certificates**: Lab test results, mill certificates, fire resistance reports
+- **Third-Party Certifications**: Intertek, UL, QCDD (Qatar Civil Defence) certificates
+- **Technical Data Sheets**: Product specifications from manufacturers
+
+## What to Extract
+- Identify ALL materials, products, and systems mentioned
+- Note ALL standards referenced (ASTM, BS, EN, ISO, NFPA, QCS, etc.)
+- Record any existing approval stamps, action codes (A=Approved, B=Approved as Noted, C=Revise & Resubmit, D=Rejected)
+- Extract test results with their values and pass/fail status
+- Identify certificates with their issuers, reference numbers, and validity dates
+- Note Arabic text content and its purpose (often QCDD certificates, project names)
+- Record DRS item statuses (Complied, Not Complied, Excluded, Noted)
+
+## Suggested QCS Queries
+Based on the materials and specifications found, suggest specific search queries that would retrieve the most relevant QCS 2024 sections. Be specific — e.g., "fire rated steel doors BS 476 requirements" rather than just "steel doors".`;
+
+export const SubmittalAnalysisSchema = z.object({
+  documentType: z
+    .enum([
+      "material_submittal",
+      "mix_design",
+      "method_statement",
+      "test_report",
+      "shop_drawing",
+      "certificate",
+      "prequalification",
+      "drs_form",
+      "combined_package",
+      "other",
+    ])
+    .describe("The type of construction submittal document"),
+
+  title: z.string().describe("Document title or subject"),
+
+  contractor: z.string().optional().describe("Contractor name"),
+  project: z.string().optional().describe("Project name"),
+  submittalNumber: z.string().optional().describe("Submittal reference number"),
+  revision: z.string().optional().describe("Revision number"),
+
+  materials: z
+    .array(
+      z.object({
+        name: z.string(),
+        manufacturer: z.string().optional(),
+        supplier: z.string().optional(),
+        standard: z
+          .string()
+          .optional()
+          .describe("Referenced standard (e.g., BS 476, ASTM C150)"),
+        properties: z
+          .record(z.string(), z.string())
+          .optional()
+          .describe("Key properties as key-value pairs"),
+      })
+    )
+    .describe("Materials and products listed in the submittal"),
+
+  standardsCited: z
+    .array(z.string())
+    .describe("All standards referenced (ASTM, BS, EN, ISO, NFPA, QCS, etc.)"),
+
+  existingApprovals: z
+    .array(
+      z.object({
+        actionCode: z
+          .string()
+          .describe("Action code: A=Approved, B=Approved as Noted, C=Revise & Resubmit, D=Rejected"),
+        authority: z.string().optional().describe("Who approved (consultant, engineer, etc.)"),
+        date: z.string().optional(),
+        notes: z.string().optional(),
+      })
+    )
+    .describe("Existing approval stamps or action codes found in the document"),
+
+  drsItems: z
+    .array(
+      z.object({
+        itemNumber: z.number(),
+        reviewerComment: z.string(),
+        contractorResponse: z.string(),
+        status: z
+          .enum(["complied", "not_complied", "excluded", "noted", "unknown"])
+          .describe("Compliance status"),
+      })
+    )
+    .optional()
+    .describe("Document Review Sheet items if present"),
+
+  certificates: z
+    .array(
+      z.object({
+        type: z.string().describe("Certificate type (fire test, mill cert, QCDD, etc.)"),
+        issuer: z.string().optional(),
+        reference: z.string().optional(),
+        validUntil: z.string().optional(),
+      })
+    )
+    .describe("Certificates found in the document"),
+
+  testResults: z
+    .array(
+      z.object({
+        test: z.string(),
+        result: z.string(),
+        requirement: z.string().optional(),
+        pass: z.boolean().optional(),
+      })
+    )
+    .describe("Test results found in the document"),
+
+  keyFindings: z
+    .array(z.string())
+    .describe("Important observations about the submittal content"),
+
+  suggestedQCSQueries: z
+    .array(z.string())
+    .describe(
+      "Specific search queries for retrieving relevant QCS 2024 sections"
+    ),
+
+  pageCount: z.number(),
+  hasArabicText: z.boolean(),
+  hasTables: z.boolean(),
+});
+
+export type SubmittalAnalysis = z.infer<typeof SubmittalAnalysisSchema>;
+
+export async function analyzeSubmittalContent(
+  extraction: PDFExtractionResult
+): Promise<SubmittalAnalysis> {
+  // Build multi-modal content: text + page images
+  const contentParts: Array<
+    | { type: "text"; text: string }
+    | { type: "image"; image: URL }
+  > = [];
+
+  // Add extracted text
+  contentParts.push({
+    type: "text",
+    text: `DOCUMENT: "${extraction.filename ?? "submittal.pdf"}" (${extraction.totalPages} pages)\n\nEXTRACTED TEXT:\n${extraction.rawText}`,
+  });
+
+  // Add page images for visual analysis
+  for (const page of extraction.pages) {
+    if (page.imageDataUrl) {
+      contentParts.push({
+        type: "text",
+        text: `\n--- PAGE ${page.pageNumber} IMAGE (visual scan) ---`,
+      });
+      contentParts.push({
+        type: "image",
+        image: new URL(page.imageDataUrl),
+      });
+    }
+  }
+
+  const { object } = await generateObject({
+    model: openai("gpt-4o"),
+    schema: SubmittalAnalysisSchema,
+    system: ANALYSIS_PROMPT,
+    messages: [{ role: "user", content: contentParts }],
+  });
+
+  return object;
+}
