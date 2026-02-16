@@ -140,9 +140,10 @@ export async function analyzeSubmittalContent(
   extraction: PDFExtractionResult
 ): Promise<SubmittalAnalysis> {
   // Build multi-modal content: text + page images
+  // AI SDK v6 uses FilePart ({ type: "file", data, mediaType }) for images, not ImagePart
   const contentParts: Array<
     | { type: "text"; text: string }
-    | { type: "image"; image: URL }
+    | { type: "file"; data: string; mediaType: string }
   > = [];
 
   // Add extracted text
@@ -151,16 +152,22 @@ export async function analyzeSubmittalContent(
     text: `DOCUMENT: "${extraction.filename ?? "submittal.pdf"}" (${extraction.totalPages} pages)\n\nEXTRACTED TEXT:\n${extraction.rawText}`,
   });
 
-  // Add page images for visual analysis
+  // Add page images as FilePart for visual analysis
   for (const page of extraction.pages) {
     if (page.imageDataUrl) {
       contentParts.push({
         type: "text",
         text: `\n--- PAGE ${page.pageNumber} IMAGE (visual scan) ---`,
       });
+      // Extract base64 data from data URL (strip "data:image/png;base64," prefix)
+      const base64Data = page.imageDataUrl.replace(
+        /^data:image\/png;base64,/,
+        ""
+      );
       contentParts.push({
-        type: "image",
-        image: new URL(page.imageDataUrl),
+        type: "file",
+        data: base64Data,
+        mediaType: "image/png",
       });
     }
   }

@@ -93,7 +93,7 @@ function injectPDFContent(
     ? [{ type: "text" as const, text: userMsg.content }]
     : userMsg.content;
 
-  const newContent: Array<{ type: "text"; text: string } | { type: "image"; image: URL } | { type: "file"; data: any; mediaType: string }> = [];
+  const newContent: Array<{ type: "text"; text: string } | { type: "file"; data: string; mediaType: string }> = [];
 
   for (const part of contentArray) {
     if (
@@ -110,16 +110,22 @@ function injectPDFContent(
           `EXTRACTED TEXT:\n${extraction.rawText}`,
       });
 
-      // Add page images for visual analysis
+      // Add page images as FilePart (AI SDK v6 uses type:"file" with mediaType for images)
       for (const page of extraction.pages) {
         if (page.imageDataUrl) {
           newContent.push({
             type: "text",
             text: `\n[Page ${page.pageNumber} image scan:]`,
           });
+          // Extract base64 data from data URL (strip "data:image/png;base64," prefix)
+          const base64Data = page.imageDataUrl.replace(
+            /^data:image\/png;base64,/,
+            ""
+          );
           newContent.push({
-            type: "image",
-            image: new URL(page.imageDataUrl),
+            type: "file",
+            data: base64Data,
+            mediaType: "image/png",
           });
         }
       }
