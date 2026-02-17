@@ -61,7 +61,6 @@ import { cn } from "@/lib/utils";
 import {
   CheckCircleIcon,
   XCircleIcon,
-  AlertTriangleIcon,
   ClipboardIcon,
   FileTextIcon,
   PlusIcon,
@@ -102,15 +101,6 @@ const VERDICT_CONFIG = {
     cardBg: "bg-red-500/[0.06] border-l-red-500 dark:bg-red-500/[0.08]",
     iconCircle: "bg-red-500/15 text-red-600 dark:text-red-400",
     titleColor: "text-red-700 dark:text-red-300",
-  },
-  "NEEDS REVISION": {
-    label: "NEEDS REVISION",
-    subtitle: "Modifications required per QCS 2024",
-    className: "bg-amber-500/10 text-amber-600 border-amber-500/20 dark:text-amber-400",
-    icon: AlertTriangleIcon,
-    cardBg: "bg-amber-500/[0.06] border-l-amber-500 dark:bg-amber-500/[0.08]",
-    iconCircle: "bg-amber-500/15 text-amber-600 dark:text-amber-400",
-    titleColor: "text-amber-700 dark:text-amber-300",
   },
 } as const;
 const MAX_DISPLAY_SOURCES = 20;
@@ -171,7 +161,7 @@ function getVerdictInfo(text: string) {
     return VERDICT_CONFIG.REJECTED;
   }
   if (upper.includes("NEEDS REVISION")) {
-    return VERDICT_CONFIG["NEEDS REVISION"];
+    return VERDICT_CONFIG.REJECTED;
   }
   return null;
 }

@@ -70,7 +70,7 @@ For text-only submittals (no PDF uploaded), skip step 1 and proceed directly to 
 Always structure your review response with these sections:
 
 ### VERDICT
-State one of: **APPROVED**, **REJECTED**, or **NEEDS REVISION**
+State one of: **APPROVED** or **REJECTED**
 
 ### DOCUMENT OVERVIEW
 Brief description of the submittal type, contractor, project, and materials covered. Note any existing approval status found in the document.
@@ -88,7 +88,7 @@ For each relevant specification requirement:
 List all QCS sections referenced in your analysis with their section numbers, clause numbers, and page numbers.
 
 ### RECOMMENDATIONS
-If rejected or needs revision, provide specific actionable recommendations.
+If rejected, provide specific actionable recommendations.
 
 ## Important Rules:
 - When a PDF is uploaded, ALWAYS call analyzeSubmittal first to properly parse the document
@@ -101,8 +101,8 @@ If rejected or needs revision, provide specific actionable recommendations.
 - Consider all relevant aspects: materials, methods, standards compliance, testing requirements, certifications
 - If you are unsure about a requirement, say so rather than guessing
 - **NEVER list raw retrieved sources/references in your text response.** The retrieved QCS chunks are displayed automatically in the UI as collapsible sources. Your text response should ONLY contain the structured review (VERDICT, DOCUMENT OVERVIEW, SUMMARY, DETAILED ANALYSIS, CITATIONS, RECOMMENDATIONS). Do NOT echo, list, or enumerate the tool results before your analysis.
-- **Hard verdict rule:** Do NOT return APPROVED unless all critical requirements are explicitly evidenced in the submittal itself. If evidence is missing, return NEEDS REVISION.
-- If the submittal references QCS 2014 (or any pre-2024 version) and does not explicitly confirm QCS 2024 compliance, the verdict must be NEEDS REVISION.
+- **Hard verdict rule:** Do NOT return APPROVED unless all critical requirements are explicitly evidenced in the submittal itself. If evidence is missing, return REJECTED.
+- If the submittal references QCS 2014 (or any pre-2024 version) and does not explicitly confirm QCS 2024 compliance, the verdict must be REJECTED.
 - Do not mark a requirement as "Meets" based on intent, future submittals, assumptions, or implicit statements. Mark as PARTIALLY MEETS or FAILS when direct evidence is absent.
 - Keep the CITATIONS section concise and relevant (max 12 citations) and include only references you directly used in the analysis.`;
 
@@ -439,17 +439,160 @@ function normalizeQuery(q: string): string {
   return q.trim().toLowerCase().replace(/\s+/g, " ");
 }
 
-function buildDeterministicQueries(analysis: SubmittalAnalysis | null): string[] {
-  const baseline = [
-    "method statement submittal requirements qcs 2024",
-    "qcs 2024 fire life safety product approval qcd qcdd requirements",
-    "qcs 2024 concrete mix design and submittal requirements",
-    "qcs 2024 earthworks compaction and field density testing",
-    "qcs 2024 masonry block work and mortar requirements",
-    "qcs 2024 quality assurance inspection testing requirements",
+type ReviewScope = {
+  passiveFire: boolean;
+  fireDetection: boolean;
+  fireFighting: boolean;
+  concrete: boolean;
+  earthworks: boolean;
+  masonry: boolean;
+};
+
+function getAnalysisScopeText(analysis: SubmittalAnalysis | null): string {
+  if (!analysis) return "";
+  return [
+    analysis.title,
+    analysis.project ?? "",
+    analysis.contractor ?? "",
+    analysis.standardsCited.join(" "),
+    analysis.keyFindings.join(" "),
+    analysis.materials.map((m) => `${m.name} ${m.standard ?? ""}`).join(" "),
+    analysis.certificates.map((c) => `${c.type} ${c.issuer ?? ""}`).join(" "),
+  ]
+    .join(" ")
+    .toLowerCase();
+}
+
+function detectReviewScope(analysis: SubmittalAnalysis | null): ReviewScope {
+  const text = getAnalysisScopeText(analysis);
+  const has = (pattern: RegExp) => pattern.test(text);
+
+  return {
+    passiveFire: has(
+      /\b(passive fire|fire[-\s]?rated|fire door|fire window|opening protection|compartmentation|fire stopping|door assembly|fire[-\s]?resistance)\b/
+    ),
+    fireDetection: has(
+      /\b(fire detection|fire alarm|detector|smoke detector|heat detector|manual call point|notification appliance|control panel|initiating device)\b/
+    ),
+    fireFighting: has(
+      /\b(fire fighting|firefighting|sprinkler|hydrant|hose reel|fire pump|jockey pump|foam system|standpipe|extinguisher)\b/
+    ),
+    concrete: has(/\b(concrete|cement|rebar|reinforcement|mix design|compressive strength)\b/),
+    earthworks: has(/\b(earthworks|roadworks|compaction|subgrade|fill material|field density)\b/),
+    masonry: has(/\b(masonry|concrete block|aac block|brickwork|mortar)\b/),
+  };
+}
+
+function buildScopeAwareBaselineQueries(
+  analysis: SubmittalAnalysis | null
+): string[] {
+  const scope = detectReviewScope(analysis);
+  const queries: string[] = [
+    "qcs 2024 submittal documentation and product approval requirements",
+    "qcs 2024 quality assurance inspection testing and certification requirements",
   ];
+
+  if (scope.passiveFire) {
+    queries.push(
+      "qcs 2024 section 23 part 06 passive fire protection opening protection fire doors and windows",
+      "qcs 2024 passive fire product approval qcdd requirements",
+      "qcs 2024 section 23 part 06 clause 6.2.4 opening protection fire doors windows",
+      "qcs 2024 section 23 part 06 clause 6.1.8 quality assurance passive fire protection system",
+      "qcs 2024 section 23 part 01 clauses 1.2.4 and 1.2.5 product certification testing recognized body"
+    );
+  }
+  if (scope.fireDetection) {
+    queries.push(
+      "qcs 2024 section 23 part 02 fire detection and alarm product approval requirements"
+    );
+  }
+  if (scope.fireFighting) {
+    queries.push(
+      "qcs 2024 section 23 part 03 fire fighting system product approval and quality assurance"
+    );
+  }
+  if (scope.concrete) {
+    queries.push(
+      "qcs 2024 section 05 concrete property requirements submittals and test certificates"
+    );
+  }
+  if (scope.earthworks) {
+    queries.push(
+      "qcs 2024 section 06 roadworks earthworks compaction field density testing"
+    );
+  }
+  if (scope.masonry) {
+    queries.push(
+      "qcs 2024 section 13 masonry unit masonry concrete blocks and mortar requirements"
+    );
+  }
+
+  return queries;
+}
+
+function filterResultsByAnalysisScope(
+  rows: QCSSearchResult[],
+  analysis: SubmittalAnalysis | null
+): QCSSearchResult[] {
+  const scope = detectReviewScope(analysis);
+
+  return rows.filter((r) => {
+    const section = r.sectionNumber.trim();
+    const part = r.partNumber.trim();
+    const domainText = `${r.sectionTitle} ${r.partTitle} ${r.clauseTitle}`.toLowerCase();
+
+    if (section === "23") {
+      if (part === "02" && !scope.fireDetection) return false;
+      if (part === "03" && !scope.fireFighting) return false;
+      if (part === "06" && !scope.passiveFire) return false;
+      return true; // Part 01 general is usually valid across fire/life-safety scopes
+    }
+
+    if (section === "05" && !scope.concrete) return false;
+    if (section === "13" && !scope.masonry) return false;
+    if (
+      section === "06" &&
+      !scope.earthworks &&
+      /\b(roadworks|earthworks|compaction|field density|subgrade)\b/.test(domainText)
+    ) {
+      return false;
+    }
+
+    return true;
+  });
+}
+
+function applyScopeCitationBoosts(
+  rows: QCSSearchResult[],
+  analysis: SubmittalAnalysis | null
+): QCSSearchResult[] {
+  const scope = detectReviewScope(analysis);
+  if (!scope.passiveFire) return rows;
+
+  return rows.map((r) => {
+    let bonus = 0;
+    if (r.sectionNumber === "23" && r.partNumber === "06" && r.clauseNumber === "6.2.4") {
+      bonus += 0.35; // Opening Protection: highest priority for fire doors/windows
+    }
+    if (r.sectionNumber === "23" && r.partNumber === "06" && r.clauseNumber === "6.1.8") {
+      bonus += 0.25; // Passive fire QA clause
+    }
+    if (
+      r.sectionNumber === "23" &&
+      r.partNumber === "01" &&
+      (r.clauseNumber === "1.2.4" || r.clauseNumber === "1.2.5")
+    ) {
+      bonus += 0.2; // Certification / recognized testing body
+    }
+    return bonus > 0 ? { ...r, score: r.score + bonus } : r;
+  });
+}
+
+function buildDeterministicQueries(analysis: SubmittalAnalysis | null): string[] {
+  const baseline = buildScopeAwareBaselineQueries(analysis);
   const suggested = analysis?.suggestedQCSQueries ?? [];
-  const merged = [...suggested, ...baseline].filter((q) => q?.trim().length > 0);
+  // Keep scope-aware baseline first so critical domain clauses are not crowded out.
+  const merged = [...baseline, ...suggested].filter((q) => q?.trim().length > 0);
 
   const seen = new Set<string>();
   const deduped: string[] = [];
@@ -464,29 +607,59 @@ function buildDeterministicQueries(analysis: SubmittalAnalysis | null): string[]
   return deduped;
 }
 
-function detectCriticalReasons(analysis: SubmittalAnalysis | null): string[] {
-  if (!analysis) return [];
+type VerdictPolicy = {
+  mandatoryVerdict: "REJECTED" | null;
+  reasons: string[];
+};
 
-  const reasons: string[] = [];
+function detectVerdictPolicy(analysis: SubmittalAnalysis | null): VerdictPolicy {
+  if (!analysis) {
+    return { mandatoryVerdict: null, reasons: [] };
+  }
+
   const standards = analysis.standardsCited.join(" ");
   const findings = analysis.keyFindings.join(" ");
-  const projectText = `${analysis.title} ${analysis.project ?? ""} ${analysis.materials.map((m) => m.name).join(" ")}`.toLowerCase();
-  const combined = `${standards} ${findings}`.toLowerCase();
+  const projectText = `${analysis.title} ${analysis.project ?? ""} ${analysis.materials.map((m) => m.name).join(" ")}`;
+  const combined = `${standards} ${findings} ${projectText}`.toLowerCase();
+
+  const hardRejectReasons: string[] = [];
+  const hasActionCodeD = analysis.existingApprovals.some(
+    (a) => a.actionCode.trim().toUpperCase() === "D"
+  );
+  if (hasActionCodeD) {
+    hardRejectReasons.push(
+      "The submittal contains an explicit Action Code D (Rejected), indicating a hard rejection status."
+    );
+  }
+
+  const explicitOverallRejection = /\boverall\s+(?:submittal\s+)?rejected\b|\bsubmittal\s+is\s+rejected\b/.test(
+    combined
+  );
+  if (explicitOverallRejection) {
+    hardRejectReasons.push(
+      "The extracted findings explicitly indicate the overall submittal is rejected."
+    );
+  }
+
+  if (hardRejectReasons.length > 0) {
+    return { mandatoryVerdict: "REJECTED", reasons: hardRejectReasons };
+  }
+
+  const revisionReasons: string[] = [];
 
   const referencesQcs2014 = /q\.?\s*c\.?\s*s\.?\s*2014|qcs\s*2014/i.test(
     `${standards} ${findings} ${analysis.title}`
   );
   const confirmsQcs2024 = /qcs\s*2024/i.test(combined);
-
   if (referencesQcs2014 && !confirmsQcs2024) {
-    reasons.push(
+    revisionReasons.push(
       "The submittal references QCS 2014 and does not explicitly confirm full compliance with QCS 2024."
     );
   }
 
   const fireScope =
     /fire|life safety|qcdd|qcd|alarm|firefighting|passive fire/i.test(
-      projectText
+      projectText.toLowerCase()
     );
   const hasQcdEvidence = analysis.certificates.some((c) =>
     /qcd|qcdd|civil defence/i.test(
@@ -494,12 +667,29 @@ function detectCriticalReasons(analysis: SubmittalAnalysis | null): string[] {
     )
   );
   if (fireScope && !hasQcdEvidence) {
-    reasons.push(
+    revisionReasons.push(
       "Fire life safety scope is present, but explicit QCD/QCDD approval evidence for products/systems is not provided in this submittal."
     );
   }
 
-  return reasons;
+  const hasOutstandingOrSeparateSubmittals =
+    /\b(submit(?:ted)? separately|separate submittal|pending approval|awaiting approval|required separately|not submitted|excluded from this submittal)\b/i.test(
+      combined
+    ) ||
+    analysis.drsItems.some((item) =>
+      ["not_complied", "unknown", "excluded"].includes(item.status)
+    );
+  if (hasOutstandingOrSeparateSubmittals) {
+    revisionReasons.push(
+      "The submittal includes outstanding or separately required components; this should be treated as REJECTED until all required submissions are completed."
+    );
+  }
+
+  if (revisionReasons.length > 0) {
+    return { mandatoryVerdict: "REJECTED", reasons: revisionReasons };
+  }
+
+  return { mandatoryVerdict: null, reasons: [] };
 }
 
 function streamStaticMarkdown(
@@ -574,7 +764,7 @@ export async function POST(req: Request) {
             writeReviewStage(writer, "drafting");
 
             const failure = `### VERDICT
-NEEDS REVISION
+REJECTED
 
 ### DOCUMENT OVERVIEW
 The PDF could not be processed for grounded review.
@@ -607,7 +797,7 @@ This response is fail-closed: a compliance verdict cannot be approved without gr
 
           const scopeAssessment = assessDocumentScope(
             analysis,
-            pdfExtraction.rawText ?? ""
+            ""
           );
           if (scopeAssessment.isOutOfScope) {
             writeReviewStage(writer, "drafting");
@@ -654,17 +844,20 @@ The document is not a construction submittal, so QCS clause-by-clause compliance
             })
           );
           const filtered = filterResults(rawResultsNested.flat());
-          const refs = rankAndSelect(filtered, MAX_TOTAL_REFS, MAX_TOTAL_GRAPH_REFS);
-          const criticalReasons = detectCriticalReasons(analysis);
+          const scopedFiltered = filterResultsByAnalysisScope(filtered, analysis);
+          const candidateRows = scopedFiltered.length >= 2 ? scopedFiltered : filtered;
+          const boostedRows = applyScopeCitationBoosts(candidateRows, analysis);
+          const refs = rankAndSelect(boostedRows, MAX_TOTAL_REFS, MAX_TOTAL_GRAPH_REFS);
+          const verdictPolicy = detectVerdictPolicy(analysis);
 
           writeReviewStage(writer, "drafting");
 
           if (refs.length === 0) {
             const failClosed = `### VERDICT
-NEEDS REVISION
+REJECTED
 
 ### DOCUMENT OVERVIEW
-The submitted method statement could not be grounded to valid QCS references after deterministic retrieval.
+The submitted submittal package could not be grounded to valid QCS references after deterministic retrieval.
 
 ### SUMMARY
 This is a fail-closed result: because no validated references were retrieved, the system cannot issue an evidence-backed approval.
@@ -672,7 +865,7 @@ This is a fail-closed result: because no validated references were retrieved, th
 ### DETAILED ANALYSIS
 - Retrieval produced zero validated QCS references after quality filters.
 - Without grounded citations, any detailed compliance conclusion would risk fabrication.
-${criticalReasons.length > 0 ? `- Critical gap(s) detected:\n${criticalReasons.map((r) => `  - ${r}`).join("\n")}` : ""}
+${verdictPolicy.reasons.length > 0 ? `- Policy-detected gap(s):\n${verdictPolicy.reasons.map((r) => `  - ${r}`).join("\n")}` : ""}
 
 ### RECOMMENDATIONS
 - Re-run with a clearer PDF/OCR source if available.
@@ -693,12 +886,14 @@ ${criticalReasons.length > 0 ? `- Critical gap(s) detected:\n${criticalReasons.m
             )
             .join("\n\n");
 
-          const forcedVerdictBlock =
-            criticalReasons.length > 0
-              ? `Mandatory verdict: NEEDS REVISION\nReasons:\n${criticalReasons
-                  .map((r) => `- ${r}`)
-                  .join("\n")}`
-              : "Use the evidence to determine verdict. APPROVED is allowed only when explicit evidence for all critical requirements is present.";
+          const forcedVerdictBlock = verdictPolicy.mandatoryVerdict
+            ? `Mandatory verdict: ${verdictPolicy.mandatoryVerdict}\nReasons:\n${verdictPolicy.reasons
+                .map((r) => `- ${r}`)
+                .join("\n")}`
+            : `Use the evidence to determine verdict.
+- APPROVED is allowed only when explicit evidence for all critical requirements is present.
+- Use REJECTED for pending, excluded, or separately-required submissions.
+- Use REJECTED for explicit hard-failure evidence (e.g., action code D or explicitly rejected overall submittal).`;
 
           const analysisSummary = analysis
             ? JSON.stringify(
@@ -707,6 +902,19 @@ ${criticalReasons.length > 0 ? `- Critical gap(s) detected:\n${criticalReasons.m
                   title: analysis.title,
                   project: analysis.project,
                   contractor: analysis.contractor,
+                  existingApprovals: analysis.existingApprovals.map((a) => ({
+                    actionCode: a.actionCode,
+                    authority: a.authority,
+                    date: a.date,
+                    notes: a.notes,
+                  })),
+                  drsStatusCounts: analysis.drsItems.reduce(
+                    (acc, item) => {
+                      acc[item.status] = (acc[item.status] ?? 0) + 1;
+                      return acc;
+                    },
+                    {} as Record<string, number>
+                  ),
                   standardsCited: analysis.standardsCited,
                   keyFindings: analysis.keyFindings,
                 },
@@ -726,7 +934,7 @@ Rules:
 - Keep output concise and structured.
 - Use at most 6 citations total. Do not cite unrelated sections.
 - Do not mention internal labels like "Submittal analysis snapshot" in the final response.
-- When referring to document evidence, use user-facing phrasing such as "As stated in the submitted method statement".
+- When referring to document evidence, use user-facing phrasing such as "As stated in the submitted submittal package".
 - Sections required exactly in this order:
   1) ### VERDICT
   2) ### DOCUMENT OVERVIEW
@@ -787,18 +995,18 @@ ${evidence}`;
           } catch (err) {
             console.error("Report generation failed:", err);
             const fallbackBody = `### VERDICT
-NEEDS REVISION
+REJECTED
 
 ### DOCUMENT OVERVIEW
-This submittal is a method statement and requires evidence-backed alignment with QCS 2024.
+This submitted package requires evidence-backed alignment with QCS 2024.
 
 ### SUMMARY
-The review could not complete full narrative generation, but grounded evidence indicates revision is required before approval.
+The review could not complete full narrative generation, but grounded evidence indicates corrective action is required before approval.
 
 ### DETAILED ANALYSIS
 1. The submittal must be aligned to QCS 2024 requirements.
 2. Fire life safety scope requires explicit approval evidence for relevant products/systems.
-3. Method statement claims should be tied to measurable QA/QC criteria and cited clauses.
+3. Submittal claims should be tied to measurable QA/QC criteria and cited clauses.
 4. Existing historical approval stamps do not replace current-cycle compliance review.
 
 ### RECOMMENDATIONS
@@ -831,8 +1039,8 @@ The review could not complete full narrative generation, but grounded evidence i
         } catch (err) {
           console.error("Deterministic PDF review stream failed:", err);
           writeReviewStage(writer, "drafting");
-          const fallback = `### VERDICT
-NEEDS REVISION
+            const fallback = `### VERDICT
+REJECTED
 
 ### DOCUMENT OVERVIEW
 The review pipeline encountered an internal error.

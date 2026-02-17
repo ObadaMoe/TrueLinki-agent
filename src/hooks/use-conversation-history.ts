@@ -147,7 +147,10 @@ function extractAssistantVerdict(messages: UIMessage[]): string | null {
       .map((p) => (p as { type: "text"; text: string }).text)
       .join(" ");
     const match = /\b(APPROVED|REJECTED|NEEDS REVISION)\b/i.exec(text);
-    if (match) return match[1].toUpperCase();
+    if (match) {
+      const verdict = match[1].toUpperCase();
+      return verdict === "NEEDS REVISION" ? "REJECTED" : verdict;
+    }
   }
   return null;
 }

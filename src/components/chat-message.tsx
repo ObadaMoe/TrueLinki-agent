@@ -26,8 +26,8 @@ function getVerdictBadge(text: string) {
     upper.includes("NEEDS REVISION")
   ) {
     return (
-      <Badge className="bg-yellow-100 text-yellow-800 border-yellow-300 hover:bg-yellow-100">
-        NEEDS REVISION
+      <Badge className="bg-red-100 text-red-800 border-red-300 hover:bg-red-100">
+        REJECTED
       </Badge>
     );
   }
@@ -43,7 +43,7 @@ function getBorderColor(text: string) {
     return "border-l-red-500";
   }
   if (upper.includes("NEEDS REVISION")) {
-    return "border-l-yellow-500";
+    return "border-l-red-500";
   }
   return "border-l-blue-500";
 }

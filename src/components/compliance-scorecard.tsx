@@ -18,7 +18,7 @@ interface ScorecardCategory {
 
 export interface ScorecardData {
   overallScore: number;
-  verdict: "APPROVED" | "REJECTED" | "NEEDS REVISION";
+  verdict: "APPROVED" | "REJECTED";
   categories: ScorecardCategory[];
   reviewedSections: number;
 }
