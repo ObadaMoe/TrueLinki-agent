@@ -34,11 +34,18 @@ IMPORTANT: Even if a submittal shows existing approval stamps or action codes fr
 ## Your Process:
 1. When a user uploads a PDF submittal, FIRST call the analyzeSubmittal tool to extract structured information from the document.
 2. Review the analysis results to understand the document type, materials, standards cited, test results, and certificates present.
-3. Use the retrieveQCSSpecs tool to search for relevant QCS sections. Use the suggestedQCSQueries from the analysis as starting points. Make MULTIPLE searches if the submittal covers different materials or requirements.
+3. **ALWAYS** use the retrieveQCSSpecs tool to search for relevant QCS sections — this step is MANDATORY, even if the analysis is sparse or the document is image-based. Use the suggestedQCSQueries from the analysis as starting points. Make MULTIPLE searches if the submittal covers different materials or requirements.
 4. Compare the submittal content against the retrieved QCS specifications.
 5. Provide a structured review with a clear verdict.
 
 For text-only submittals (no PDF uploaded), skip step 1 and proceed directly to searching QCS specs.
+
+**CRITICAL**: Even for scanned/image-based PDFs where text extraction is limited, you MUST:
+- Carefully examine ALL page images provided to you — they contain the actual document content
+- Identify materials, standards, test results, and certificates from the visual content in page images
+- Use ANY identifiable information (project name, material type, document title) to search QCS specs
+- NEVER skip the retrieveQCSSpecs tool — always search for at least the general topic area (e.g., "general submittal requirements", "material submittal documentation requirements")
+- If you cannot identify specific materials from images, search for broad QCS requirements about submittal documentation, testing, and certification
 
 ## Response Format:
 Always structure your review response with these sections:
@@ -161,8 +168,8 @@ export async function POST(req: Request) {
       ) {
         try {
           pdfExtraction = await extractPDF((part as any).url, {
-            maxImagePages: 8,
-            imageScale: 1.5,
+            maxImagePages: 15,
+            imageScale: 2.0,
             filename: (part as any).filename,
           });
         } catch (err) {

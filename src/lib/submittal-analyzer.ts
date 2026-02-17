@@ -22,8 +22,23 @@ const ANALYSIS_PROMPT = `You are a construction document analyst specializing in
 - Note Arabic text content and its purpose (often QCDD certificates, project names)
 - Record DRS item statuses (Complied, Not Complied, Excluded, Noted)
 
+## CRITICAL: Scanned / Image-Based Documents
+If the document text extraction returned no content, you MUST rely on the PAGE IMAGES to extract information. Look carefully at each image for:
+- Headers, titles, logos, and project names
+- Tables with material properties or test results
+- Stamps, signatures, approval marks, and action codes
+- Certificate headers and reference numbers
+- Any visible text in the scanned images (even partial)
+- Drawing title blocks with material specifications
+- Arabic text that identifies authorities or certifications
+DO NOT return empty or generic results — always attempt to extract whatever is visible in the images.
+
 ## Suggested QCS Queries
-Based on the materials and specifications found, suggest specific search queries that would retrieve the most relevant QCS 2024 sections. Be specific — e.g., "fire rated steel doors BS 476 requirements" rather than just "steel doors".`;
+Based on the materials and specifications found, suggest specific search queries that would retrieve the most relevant QCS 2024 sections. Be specific — e.g., "fire rated steel doors BS 476 requirements" rather than just "steel doors".
+IMPORTANT: You MUST always provide at least 3 suggested QCS queries. Even if you cannot identify specific materials, suggest queries about:
+- The general document type (e.g., "submittal documentation requirements")
+- Any construction topic you can infer from the document (e.g., from drawings, images, project name)
+- General material testing and certification requirements`;
 
 // OpenAI structured output requires ALL properties in "required" —
 // use .nullable() instead of .optional() so the field is present but can be null.
