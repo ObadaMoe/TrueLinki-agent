@@ -566,6 +566,8 @@ Rules:
 - Do NOT include a CITATIONS section (it is appended separately).
 - Keep output concise and structured.
 - Use at most 6 citations total. Do not cite unrelated sections.
+- Do not mention internal labels like "Submittal analysis snapshot" in the final response.
+- When referring to document evidence, use user-facing phrasing such as "As stated in the submitted method statement".
 - Sections required exactly in this order:
   1) ### VERDICT
   2) ### DOCUMENT OVERVIEW
@@ -574,7 +576,7 @@ Rules:
   5) ### RECOMMENDATIONS
 - For DETAILED ANALYSIS, include 4-6 numbered checks and cite evidence inline like [C1], [C3].
 
-Submittal analysis snapshot:
+Document evidence extracted from the submitted submittal:
 ${analysisSummary}
 
 Validated QCS evidence:
