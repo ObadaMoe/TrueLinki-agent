@@ -149,6 +149,7 @@ export async function POST(req: Request) {
 
   // --- Detect and preprocess PDF attachments ---
   let pdfExtraction: PDFExtractionResult | null = null;
+  let pdfExtractionError: string | null = null;
   const lastMessage = messages[messages.length - 1];
 
   if (lastMessage?.role === "user") {
@@ -165,7 +166,9 @@ export async function POST(req: Request) {
             filename: (part as any).filename,
           });
         } catch (err) {
-          console.error("PDF extraction failed, falling back to raw:", err);
+          const msg = err instanceof Error ? err.message : String(err);
+          console.error("PDF extraction failed:", msg, err);
+          pdfExtractionError = msg;
         }
         break; // Process first PDF only
       }
@@ -202,6 +205,11 @@ export async function POST(req: Request) {
         }),
         execute: async () => {
           if (!pdfExtraction) {
+            if (pdfExtractionError) {
+              return {
+                error: `PDF extraction failed: ${pdfExtractionError}. Please inform the user about this technical issue and suggest they try again.`,
+              };
+            }
             return { error: "No PDF document was uploaded with this message." };
           }
           return await analyzeSubmittalContent(pdfExtraction);
