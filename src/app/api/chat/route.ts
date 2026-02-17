@@ -180,6 +180,17 @@ export async function POST(req: Request) {
 
   if (pdfExtraction) {
     modelMessages = injectPDFContent(modelMessages, pdfExtraction);
+
+    // Debug: log what content types are in the last user message
+    const lastUser = modelMessages.findLast((m) => m.role === "user");
+    if (lastUser && Array.isArray(lastUser.content)) {
+      const summary = lastUser.content.map((p: any) => {
+        if (p.type === "text") return `text(${p.text.length} chars)`;
+        if (p.type === "file") return `file(${p.mediaType}, ${typeof p.data === "string" ? `${(p.data.length / 1024).toFixed(0)}KB` : typeof p.data})`;
+        return `unknown(${p.type})`;
+      });
+      console.log("[PDF inject] content parts:", summary.join(", "));
+    }
   }
 
   // --- Stream with enhanced tools ---
