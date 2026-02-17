@@ -109,15 +109,40 @@ function injectPDFContent(
       "mediaType" in part &&
       (part as any).mediaType === "application/pdf"
     ) {
-      // Replace raw PDF with extracted text only — images are handled by
-      // the analyzeSubmittal tool to avoid sending them twice
+      // Replace raw PDF with extracted text
       newContent.push({
         type: "text",
         text:
           `[PDF Document: "${extraction.filename ?? "submittal.pdf"}" — ${extraction.totalPages} pages]\n\n` +
-          `EXTRACTED TEXT:\n${extraction.rawText}\n\n` +
-          `[Page images are available via the analyzeSubmittal tool — call it to analyze document visuals.]`,
+          `EXTRACTED TEXT:\n${extraction.rawText}`,
       });
+
+      // For scanned PDFs, include key page images so the main model can
+      // visually reason about the document (analyzer alone isn't enough
+      // for the final review). Limit to first 5 pages to control tokens.
+      if (extraction.isScanned) {
+        const maxMainImages = 5;
+        let imageCount = 0;
+        for (const page of extraction.pages) {
+          if (page.imageDataUrl && imageCount < maxMainImages) {
+            newContent.push({
+              type: "text",
+              text: `\n[Page ${page.pageNumber} scan:]`,
+            });
+            const mediaType = page.imageMediaType ?? "image/jpeg";
+            const base64Data = page.imageDataUrl.replace(
+              /^data:image\/[a-z]+;base64,/,
+              ""
+            );
+            newContent.push({
+              type: "file",
+              data: base64Data,
+              mediaType,
+            });
+            imageCount++;
+          }
+        }
+      }
     } else {
       newContent.push(part as any);
     }

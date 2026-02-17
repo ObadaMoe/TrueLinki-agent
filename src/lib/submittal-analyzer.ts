@@ -194,7 +194,7 @@ export async function analyzeSubmittalContent(
   }
 
   const { object } = await generateObject({
-    model: openai("gpt-4o-mini"),
+    model: openai("gpt-4o"),
     schema: SubmittalAnalysisSchema,
     system: ANALYSIS_PROMPT,
     messages: [{ role: "user", content: contentParts }],
