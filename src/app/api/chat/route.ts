@@ -2,12 +2,10 @@ import {
   createUIMessageStream,
   createUIMessageStreamResponse,
   convertToModelMessages,
-  generateText,
   streamText,
   tool,
   stepCountIs,
   type UIMessage,
-  type ModelMessage,
 } from "ai";
 import { google, type GoogleGenerativeAIProviderOptions } from "@ai-sdk/google";
 import { z } from "zod";
@@ -107,55 +105,6 @@ If rejected or needs revision, provide specific actionable recommendations.
 - If the submittal references QCS 2014 (or any pre-2024 version) and does not explicitly confirm QCS 2024 compliance, the verdict must be NEEDS REVISION.
 - Do not mark a requirement as "Meets" based on intent, future submittals, assumptions, or implicit statements. Mark as PARTIALLY MEETS or FAILS when direct evidence is absent.
 - Keep the CITATIONS section concise and relevant (max 12 citations) and include only references you directly used in the analysis.`;
-
-/**
- * Replace raw PDF file parts in model messages with extracted text + page images.
- */
-function injectPDFContent(
-  modelMessages: ModelMessage[],
-  extraction: PDFExtractionResult
-): ModelMessage[] {
-  const lastUserIdx = modelMessages.findLastIndex((m) => m.role === "user");
-  if (lastUserIdx === -1) return modelMessages;
-
-  const userMsg = modelMessages[lastUserIdx];
-  if (userMsg.role !== "user") return modelMessages;
-
-  // Content may be a string or parts array
-  const contentArray = typeof userMsg.content === "string"
-    ? [{ type: "text" as const, text: userMsg.content }]
-    : userMsg.content;
-
-  const newContent: Array<{ type: "text"; text: string } | { type: "file"; data: string; mediaType: string }> = [];
-
-  for (const part of contentArray) {
-    if (
-      typeof part === "object" &&
-      part.type === "file" &&
-      "mediaType" in part &&
-      (part as any).mediaType === "application/pdf"
-    ) {
-      // Replace the raw PDF file part with a text summary.
-      // The actual PDF content will be analyzed by the analyzeSubmittal tool
-      // (which has its own GPT-4o call) — we don't need to send it again
-      // in the main conversation context, which would double token usage.
-      newContent.push({
-        type: "text",
-        text:
-          `[PDF Document: "${extraction.filename ?? "submittal.pdf"}" — ${extraction.totalPages} pages` +
-          (extraction.isScanned ? ", scanned/image-based" : "") +
-          `]\n\n` +
-          `EXTRACTED TEXT:\n${extraction.rawText}`,
-      });
-    } else {
-      newContent.push(part as any);
-    }
-  }
-
-  const updated = [...modelMessages];
-  updated[lastUserIdx] = { ...userMsg, content: newContent as any };
-  return updated;
-}
 
 type RetrievedRef = {
   reference: string;
@@ -438,9 +387,6 @@ export async function POST(req: Request) {
           let pdfExtraction: PDFExtractionResult;
           try {
             pdfExtraction = await extractPDF(pdfAttachment.url, {
-              maxImagePages: 10,
-              imageScale: 1.5,
-              imageFormat: "jpeg",
               filename: pdfAttachment.filename,
             });
           } catch (err) {
