@@ -419,3 +419,75 @@
   background: oklch(from var(--muted) l c h / 40%);
   border-left-color: var(--muted-foreground);
 }
+
+/* ─── Blueprint Grid (Empty State Background) ─── */
+
+.blueprint-grid {
+  position: relative;
+}
+
+.blueprint-grid::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background-image:
+    linear-gradient(oklch(0.7 0.06 230 / 6%) 1px, transparent 1px),
+    linear-gradient(90deg, oklch(0.7 0.06 230 / 6%) 1px, transparent 1px);
+  background-size: 48px 48px;
+  mask-image: radial-gradient(ellipse 70% 55% at 50% 40%, black 10%, transparent 70%);
+  pointer-events: none;
+}
+
+.dark .blueprint-grid::before {
+  background-image:
+    linear-gradient(oklch(0.45 0.08 230 / 12%) 1px, transparent 1px),
+    linear-gradient(90deg, oklch(0.45 0.08 230 / 12%) 1px, transparent 1px);
+}
+
+/* ─── Logo Glow ─── */
+
+.logo-glow {
+  box-shadow: 0 0 60px 16px oklch(0.65 0.06 230 / 18%);
+}
+
+.dark .logo-glow {
+  box-shadow: 0 0 60px 16px oklch(0.55 0.12 230 / 32%);
+}
+
+/* ─── Verdict Card ─── */
+
+@keyframes verdict-enter {
+  from {
+    opacity: 0;
+    transform: scale(0.96) translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+.verdict-card {
+  animation: verdict-enter 0.45s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+/* ─── Header Stat Badge ─── */
+
+@keyframes stat-shimmer {
+  0%, 100% { opacity: 0.65; }
+  50% { opacity: 1; }
+}
+
+.stat-badge {
+  animation: stat-shimmer 4s ease-in-out infinite;
+}
+
+/* ─── Assistant Message Left Accent ─── */
+
+.assistant-accent {
+  border-left: 2px solid oklch(from var(--foreground) l c h / 6%);
+}
+
+.dark .assistant-accent {
+  border-left-color: oklch(from var(--foreground) l c h / 8%);
+}

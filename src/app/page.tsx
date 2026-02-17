@@ -57,14 +57,13 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { cn } from "@/lib/utils";
 import {
   CheckCircleIcon,
   XCircleIcon,
   AlertTriangleIcon,
   ClipboardIcon,
   FileTextIcon,
-  HardHatIcon,
-  BuildingIcon,
   PlusIcon,
   PaperclipIcon,
   SearchIcon,
@@ -74,6 +73,7 @@ import {
   LoaderIcon,
   AlertCircleIcon,
   RefreshCwIcon,
+  BrainCircuitIcon,
 } from "lucide-react";
 
 const BRAND_LOGO_SRC = "/cb.svg";
@@ -81,159 +81,36 @@ const BRAND_LOGO_SRC = "/cb.svg";
 // ---------------------------------------------------------------------------
 // Sample submittals
 // ---------------------------------------------------------------------------
-
-const SAMPLE_SUBMITTALS = [
-  {
-    label: "Cement Submittal",
-    description: "Portland Cement Type I review",
-    icon: <BuildingIcon className="h-4 w-4" />,
-    text: `Please review the following construction submittal against QCS 2024 requirements:
-
-MATERIAL SUBMITTAL - Portland Cement
-
-Contractor: Al-Rayyan Construction LLC
-Project: Highway Bridge Expansion - Lusail
-Submittal No: MAT-2024-0156
-
-Material: Portland Cement Type I
-Manufacturer: Qatar National Cement Company (QNCC)
-Standard: ASTM C150 / BS EN 197-1
-Bag Weight: 50 kg
-
-Properties:
-- Compressive Strength (3 days): 18 MPa
-- Compressive Strength (7 days): 26 MPa
-- Compressive Strength (28 days): 42 MPa
-- Initial Setting Time: 120 minutes
-- Final Setting Time: 240 minutes
-- Fineness (Blaine): 320 m²/kg
-
-Test Certificates: Mill test certificate from QNCC Lab attached
-Quantity Required: 5,000 tonnes
-Delivery Schedule: 500 tonnes/month over 10 months`,
-  },
-  {
-    label: "Concrete Mix Design",
-    description: "Grade C40/20 mix review",
-    icon: <HardHatIcon className="h-4 w-4" />,
-    text: `Please review the following construction submittal against QCS 2024 requirements:
-
-SUBMITTAL - Concrete Mix Design
-
-Contractor: Qatar Building Company
-Project: Commercial Tower - West Bay
-Submittal No: MIX-2024-0089
-
-Mix Designation: Grade C40/20
-Target Strength: 40 MPa at 28 days
-Maximum Aggregate Size: 20 mm
-Slump: 100 ± 25 mm
-Water/Cement Ratio: 0.45
-
-Materials:
-- Cement: OPC Type I (QNCC), 380 kg/m³
-- Fine Aggregate: Washed sand, 720 kg/m³
-- Coarse Aggregate: Gabbro 20mm, 1100 kg/m³
-- Water: Potable, 171 L/m³
-- Admixture: Superplasticizer (Sika ViscoCrete), 3.8 L/m³
-
-Trial Mix Results:
-- 7-day strength: 32 MPa
-- 28-day strength: 46 MPa
-- Slump: 110 mm
-- Air Content: 2.1%
-- Temperature at placement: 28°C`,
-  },
-  {
-    label: "Waterproofing Membrane",
-    description: "Bituminous membrane review",
-    icon: <FileTextIcon className="h-4 w-4" />,
-    text: `Please review the following construction submittal against QCS 2024 requirements:
-
-MATERIAL SUBMITTAL - Waterproofing System
-
-Contractor: National Construction Co.
-Project: Underground Parking Structure - The Pearl
-Submittal No: MAT-2024-0234
-
-Product: Bituminous Waterproofing Membrane
-Manufacturer: Sika AG
-Product Name: Sika Proof Membrane
-Type: Modified Bitumen Sheet, torch-applied
-Thickness: 4 mm
-
-Application: Below-grade foundation walls and raft foundation
-Area: 12,500 m²
-
-Properties:
-- Tensile Strength: 25 N/mm (longitudinal)
-- Elongation at Break: 35%
-- Water Vapor Transmission: 0.2 g/m².24h
-- Temperature Resistance: -20°C to +100°C
-- Root Resistance: Yes (EN 13948)
-
-Installation Method: Torch-applied, single layer with 100mm side laps and 150mm end laps
-Primer: Sika Igol Primer applied to prepared substrate
-Surface Preparation: Clean, dry concrete surface, min 28 days cured`,
-  },
-  {
-    label: "Steel Reinforcement",
-    description: "Deformed bars B500B review",
-    icon: <BuildingIcon className="h-4 w-4" />,
-    text: `Please review the following construction submittal against QCS 2024 requirements:
-
-MATERIAL SUBMITTAL - Steel Reinforcement
-
-Contractor: Modern Construction Group
-Project: Residential Complex - Lusail City
-Submittal No: MAT-2024-0312
-
-Material: Deformed Steel Reinforcement Bars
-Manufacturer: Qatar Steel Company
-Standard: BS 4449:2005 Grade B500B / ASTM A615 Grade 60
-Origin: Qatar (Local Production)
-
-Bar Sizes Submitted:
-- 10mm, 12mm, 16mm, 20mm, 25mm, 32mm
-
-Mechanical Properties (from Mill Certificate):
-- Yield Strength: 520 MPa (min 500 MPa required)
-- Tensile Strength: 610 MPa
-- Elongation: 16%
-- Bend Test: Passed (180° bend, no cracks)
-- Rebend Test: Passed
-
-Chemical Composition:
-- Carbon: 0.22%
-- Manganese: 0.85%
-- Sulphur: 0.035%
-- Phosphorus: 0.030%
-
-Quantity: 8,500 tonnes
-Delivery: Monthly as per construction schedule
-Storage: Covered storage area, raised off ground on timber bearers`,
-  },
-];
-
-// ---------------------------------------------------------------------------
 // Verdict helper
 // ---------------------------------------------------------------------------
 
 const VERDICT_CONFIG = {
   APPROVED: {
     label: "APPROVED",
+    subtitle: "Compliant with QCS 2024",
     className: "bg-emerald-500/10 text-emerald-600 border-emerald-500/20 dark:text-emerald-400",
     icon: CheckCircleIcon,
+    cardBg: "bg-emerald-500/[0.06] border-l-emerald-500 dark:bg-emerald-500/[0.08]",
+    iconCircle: "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400",
+    titleColor: "text-emerald-700 dark:text-emerald-300",
   },
   REJECTED: {
     label: "REJECTED",
+    subtitle: "Non-compliant with QCS 2024",
     className: "bg-red-500/10 text-red-600 border-red-500/20 dark:text-red-400",
     icon: XCircleIcon,
+    cardBg: "bg-red-500/[0.06] border-l-red-500 dark:bg-red-500/[0.08]",
+    iconCircle: "bg-red-500/15 text-red-600 dark:text-red-400",
+    titleColor: "text-red-700 dark:text-red-300",
   },
   "NEEDS REVISION": {
     label: "NEEDS REVISION",
+    subtitle: "Modifications required per QCS 2024",
     className: "bg-amber-500/10 text-amber-600 border-amber-500/20 dark:text-amber-400",
     icon: AlertTriangleIcon,
+    cardBg: "bg-amber-500/[0.06] border-l-amber-500 dark:bg-amber-500/[0.08]",
+    iconCircle: "bg-amber-500/15 text-amber-600 dark:text-amber-400",
+    titleColor: "text-amber-700 dark:text-amber-300",
   },
 } as const;
 const MAX_DISPLAY_SOURCES = 20;
@@ -450,6 +327,10 @@ function ChatMessages({ messages, status }: { messages: UIMessage[]; status: str
           .map((p) => (p as { type: "text"; text: string }).text)
           .join("");
         const fullText = isUser ? rawText : sanitizeAssistantText(rawText);
+        const reasoningParts = !isUser ? message.parts.filter((p) => p.type === "reasoning") : [];
+        const reasoningText = reasoningParts
+          .map((p) => (p as { type: "reasoning"; text: string }).text)
+          .join("");
         const toolParts = message.parts.filter(
           (p) => typeof p.type === "string" && p.type.startsWith("tool-")
         );
@@ -550,38 +431,88 @@ function ChatMessages({ messages, status }: { messages: UIMessage[]; status: str
                         <svg className="h-3.5 w-3.5 transition-transform [[data-state=open]_&]:rotate-180" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m6 9 6 6 6-6"/></svg>
                       </SourcesTrigger>
                       <SourcesContent>
-                        {qcsSources.map((src, idx) => (
-                          <Source key={idx} href="#">
-                            {src.source === "graph" ? (
-                              <NetworkIcon className="h-3.5 w-3.5 shrink-0 text-violet-500" />
-                            ) : (
-                              <FileTextIcon className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-                            )}
-                            <span className="text-xs">{src.reference}</span>
-                            {src.source === "graph" && (
-                              <span className="ml-auto shrink-0 rounded-full bg-violet-500/10 px-1.5 py-0.5 text-[10px] font-medium text-violet-600 dark:text-violet-400">
-                                graph
+                        {qcsSources.map((src, idx) => {
+                          const pageMatch = src.reference.match(/\(Pages?\s+(\d[\d–-]*\d?)\)/i);
+                          const pageLabel = pageMatch ? `p.${pageMatch[1]}` : null;
+                          return (
+                            <Source
+                              key={idx}
+                              className={
+                                src.source === "graph"
+                                  ? "border-violet-500/20 bg-violet-500/[0.03] dark:bg-violet-500/[0.05]"
+                                  : undefined
+                              }
+                            >
+                              {src.source === "graph" ? (
+                                <NetworkIcon className="h-3.5 w-3.5 shrink-0 text-violet-500" />
+                              ) : (
+                                <FileTextIcon className="h-3.5 w-3.5 shrink-0 text-muted-foreground/60" />
+                              )}
+                              <span className="text-xs flex-1 min-w-0 truncate">
+                                {src.reference}
                               </span>
-                            )}
-                          </Source>
-                        ))}
+                              {pageLabel && (
+                                <span className="shrink-0 rounded bg-muted px-1.5 py-0.5 text-[9px] font-mono font-medium text-muted-foreground">
+                                  {pageLabel}
+                                </span>
+                              )}
+                              {src.source === "graph" && (
+                                <span className="shrink-0 rounded-full bg-violet-500/10 px-1.5 py-0.5 text-[10px] font-medium text-violet-600 dark:text-violet-400">
+                                  graph
+                                </span>
+                              )}
+                            </Source>
+                          );
+                        })}
                       </SourcesContent>
                     </Sources>
                   )}
 
+                  {reasoningText && (
+                    <details className="group/reasoning mb-3" open={!fullText || undefined}>
+                      <summary className="flex items-center gap-2 text-xs text-muted-foreground/70 cursor-pointer select-none list-none [&::-webkit-details-marker]:hidden">
+                        <BrainCircuitIcon className={cn("h-3.5 w-3.5", !fullText && isLastAssistant && isStreaming && "animate-pulse")} />
+                        <span className="font-medium">{!fullText && isLastAssistant && isStreaming ? "Reasoning..." : "Reasoning"}</span>
+                        <svg className="h-3 w-3 transition-transform group-open/reasoning:rotate-180 ml-auto" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m6 9 6 6 6-6"/></svg>
+                      </summary>
+                      <div className="mt-2 rounded-lg bg-muted/30 border border-border/30 p-3 text-xs text-muted-foreground/70 whitespace-pre-wrap max-h-60 overflow-y-auto leading-relaxed">
+                        {reasoningText}
+                      </div>
+                    </details>
+                  )}
+
                   {verdict && (
-                    <Badge
-                      variant="outline"
-                      className={`mb-3 gap-1.5 ${verdict.className}`}
+                    <div
+                      className={cn(
+                        "verdict-card flex items-center gap-3.5 rounded-xl border border-border/40 border-l-[3px] px-4 py-3 mb-4",
+                        verdict.cardBg
+                      )}
                     >
-                      <verdict.icon className="h-3.5 w-3.5" />
-                      {verdict.label}
-                    </Badge>
+                      <div
+                        className={cn(
+                          "flex h-9 w-9 shrink-0 items-center justify-center rounded-full",
+                          verdict.iconCircle
+                        )}
+                      >
+                        <verdict.icon className="h-5 w-5" />
+                      </div>
+                      <div>
+                        <p className={cn("text-sm font-bold tracking-tight", verdict.titleColor)}>
+                          {verdict.label}
+                        </p>
+                        <p className="text-[11px] text-muted-foreground mt-0.5">
+                          {verdict.subtitle}
+                        </p>
+                      </div>
+                    </div>
                   )}
 
                   {fullText ? (
                     <MessageResponse className="agent-response">{fullText}</MessageResponse>
                   ) : (isLastAssistant && isStreaming) ? (() => {
+                    if (reasoningText) {
+                      return <Shimmer className="w-full">Composing response...</Shimmer>;
+                    }
                     const label = backendStageLabel
                       ? backendStageLabel
                       : hasRetrieveTool
@@ -730,19 +661,6 @@ export default function Home() {
     [history.activeId, history, sendMessage]
   );
 
-  const handleSampleClick = useCallback(
-    (text: string) => {
-      if (isLoading) return;
-
-      if (!history.activeId) {
-        history.createConversation();
-      }
-
-      sendMessage({ text });
-    },
-    [isLoading, history.activeId, history, sendMessage]
-  );
-
   const handleNewChat = useCallback(() => {
     if (isLoading) return;
     switchingRef.current = true;
@@ -829,7 +747,7 @@ export default function Home() {
               </Button>
 
               <div className="flex items-center gap-3">
-                <div className="relative flex h-8 w-8 items-center justify-center overflow-hidden rounded-lg bg-foreground/5 text-foreground">
+                <div className="relative flex h-8 w-8 items-center justify-center overflow-hidden rounded-lg bg-foreground/5 ring-1 ring-foreground/[0.08] text-foreground">
                   <Image
                     src={BRAND_LOGO_SRC}
                     alt="Construct Bot logo"
@@ -840,7 +758,7 @@ export default function Home() {
                   />
                 </div>
                 <div>
-                  <h1 className="text-sm font-semibold leading-tight">
+                  <h1 className="text-sm font-bold leading-tight tracking-tight">
                     Construct Bot
                   </h1>
                   <p className="text-[11px] text-muted-foreground">
@@ -850,7 +768,8 @@ export default function Home() {
               </div>
             </div>
             <div className="flex items-center gap-1.5">
-              <Badge variant="outline" className="text-[10px] hidden sm:flex font-normal text-muted-foreground">
+              <Badge variant="outline" className="stat-badge text-[10px] hidden sm:flex font-normal text-muted-foreground gap-1.5">
+                <DatabaseIcon className="h-3 w-3 text-muted-foreground/50" />
                 4,441 pages indexed
               </Badge>
               {hasMessages && (
@@ -874,47 +793,24 @@ export default function Home() {
         <Conversation className="flex-1 min-h-0">
           <ConversationContent className="mx-auto max-w-3xl px-4 py-6">
             {!hasMessages ? (
-              <div className="flex flex-col items-center justify-center h-full gap-8 px-2">
+              <div className="blueprint-grid flex flex-col items-center justify-center h-full gap-8 px-2">
                 <ConversationEmptyState
                   icon={
-                    <span className="relative block h-10 w-10 overflow-hidden">
+                    <div className="logo-glow relative flex h-14 w-14 items-center justify-center rounded-2xl bg-foreground/[0.04] ring-1 ring-foreground/[0.06]">
                       <Image
                         src={BRAND_LOGO_SRC}
                         alt="Construct Bot logo"
                         fill
-                        sizes="40px"
-                        className="object-contain opacity-50 dark:invert"
+                        sizes="56px"
+                        className="object-contain p-2 dark:invert"
                       />
-                    </span>
+                    </div>
                   }
                   title="Construction Submittal Review"
-                  description="Paste a material submittal, upload a PDF, or try a sample below."
+                  description="Paste a material submittal or upload a PDF to get started."
+                  className="[&_h3]:text-lg [&_h3]:tracking-tight"
                 />
 
-                <div className="w-full max-w-2xl">
-                  <div className="flex gap-2 overflow-x-auto pb-2 snap-x snap-mandatory sm:grid sm:grid-cols-2 sm:overflow-x-visible sm:pb-0">
-                    {SAMPLE_SUBMITTALS.map((sample) => (
-                      <button
-                        key={sample.label}
-                        type="button"
-                        onClick={() => handleSampleClick(sample.text)}
-                        className="group flex-none w-[240px] snap-start rounded-lg border border-border/60 p-3 text-left transition-all hover:border-border hover:shadow-sm sm:w-auto sm:flex-auto"
-                      >
-                        <div className="flex items-start gap-2.5">
-                          <div className="mt-0.5 text-muted-foreground/70 group-hover:text-muted-foreground transition-colors">
-                            {sample.icon}
-                          </div>
-                          <div className="min-w-0">
-                            <p className="text-sm font-medium">{sample.label}</p>
-                            <p className="text-xs text-muted-foreground mt-0.5">
-                              {sample.description}
-                            </p>
-                          </div>
-                        </div>
-                      </button>
-                    ))}
-                  </div>
-                </div>
               </div>
             ) : (
               <>

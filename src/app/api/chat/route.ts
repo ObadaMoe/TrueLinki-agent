@@ -9,7 +9,7 @@ import {
   type UIMessage,
   type ModelMessage,
 } from "ai";
-import { google } from "@ai-sdk/google";
+import { google, type GoogleGenerativeAIProviderOptions } from "@ai-sdk/google";
 import { z } from "zod";
 import { searchQCS, hybridSearch, type QCSSearchResult } from "@/lib/vector-store";
 import { extractPDF, type PDFExtractionResult } from "@/lib/pdf-extract";
@@ -592,17 +592,36 @@ ${evidence}`;
             } as any);
           });
 
-          writer.write({ type: "text-start", id: "text-1" } as any);
-
+          let textStarted = false;
           try {
             const reportResult = streamText({
               model: google("gemini-2.5-flash"),
               temperature: 0,
               prompt: reportPrompt,
+              providerOptions: {
+                google: {
+                  thinkingConfig: {
+                    includeThoughts: true,
+                    thinkingBudget: 10240,
+                  },
+                } satisfies GoogleGenerativeAIProviderOptions,
+              },
             });
 
-            for await (const delta of reportResult.textStream) {
-              writer.write({ type: "text-delta", id: "text-1", delta } as any);
+            for await (const part of reportResult.fullStream) {
+              if (part.type === "reasoning-start") {
+                writer.write({ type: "reasoning-start", id: part.id } as any);
+              } else if (part.type === "reasoning-delta") {
+                writer.write({ type: "reasoning-delta", id: part.id, delta: part.text } as any);
+              } else if (part.type === "reasoning-end") {
+                writer.write({ type: "reasoning-end", id: part.id } as any);
+              } else if (part.type === "text-delta") {
+                if (!textStarted) {
+                  writer.write({ type: "text-start", id: "text-1" } as any);
+                  textStarted = true;
+                }
+                writer.write({ type: "text-delta", id: "text-1", delta: part.text } as any);
+              }
             }
           } catch (err) {
             console.error("Report generation failed:", err);
@@ -625,7 +644,15 @@ The review could not complete full narrative generation, but grounded evidence i
 - Update all legacy references to QCS 2024.
 - Provide explicit product approvals/certifications where required.
 - Re-submit with clear clause-level compliance statements.`;
+            if (!textStarted) {
+              writer.write({ type: "text-start", id: "text-1" } as any);
+              textStarted = true;
+            }
             writer.write({ type: "text-delta", id: "text-1", delta: fallbackBody } as any);
+          }
+
+          if (!textStarted) {
+            writer.write({ type: "text-start", id: "text-1" } as any);
           }
 
           // Append citation section after streamed report
@@ -675,6 +702,14 @@ This response is fail-closed to avoid ungrounded approvals.
     system: SYSTEM_PROMPT,
     messages: modelMessages,
     stopWhen: stepCountIs(8),
+    providerOptions: {
+      google: {
+        thinkingConfig: {
+          includeThoughts: true,
+          thinkingBudget: 10240,
+        },
+      } satisfies GoogleGenerativeAIProviderOptions,
+    },
     tools: {
       analyzeSubmittal: tool({
         description:
@@ -782,5 +817,5 @@ This response is fail-closed to avoid ungrounded approvals.
     },
   });
 
-  return result.toUIMessageStreamResponse();
+  return result.toUIMessageStreamResponse({ sendReasoning: true });
 }
