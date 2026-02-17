@@ -47,13 +47,48 @@ function readStorage(): StoredConversation[] {
   }
 }
 
+/** Strip large binary/file data from messages before persisting. */
+function stripBinaryParts(messages: UIMessage[]): UIMessage[] {
+  return messages.map((msg) => ({
+    ...msg,
+    parts: msg.parts
+      .filter((p) => p.type !== "file")
+      .map((p) => {
+        // Strip any inline data URLs from tool results that may contain images
+        if (p.type === "text") {
+          const tp = p as { type: "text"; text: string };
+          if (tp.text.length > 50_000) {
+            return { ...tp, text: tp.text.slice(0, 50_000) + "\n[...truncated for storage]" };
+          }
+        }
+        return p;
+      }),
+  }));
+}
+
 function writeStorage(conversations: StoredConversation[]) {
   if (typeof window === "undefined") return;
   // Prune to max limit (keep newest)
   const pruned = conversations
     .sort((a, b) => b.updatedAt - a.updatedAt)
     .slice(0, MAX_CONVERSATIONS);
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(pruned));
+  // Strip binary data to avoid exceeding localStorage quota (~5-10MB)
+  const lightweight = pruned.map((c) => ({
+    ...c,
+    messages: stripBinaryParts(c.messages),
+  }));
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(lightweight));
+  } catch {
+    // If still too large, keep only recent conversations and retry
+    try {
+      const fewer = lightweight.slice(0, Math.max(5, Math.floor(lightweight.length / 2)));
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(fewer));
+    } catch {
+      // Last resort: clear storage to prevent app crash
+      localStorage.removeItem(STORAGE_KEY);
+    }
+  }
 }
 
 function titleFromMessages(messages: UIMessage[]): string {
