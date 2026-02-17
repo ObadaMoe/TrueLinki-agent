@@ -113,8 +113,187 @@ type RetrievedRef = {
   source: "vector" | "graph";
 };
 
+type ScopeSignal = {
+  label: string;
+  pattern: RegExp;
+};
+
+const NON_CONSTRUCTION_SIGNALS: ScopeSignal[] = [
+  { label: "internship", pattern: /\binternship\b/i },
+  { label: "employment proof", pattern: /\bemployment proof\b/i },
+  { label: "confidentiality agreement", pattern: /\bconfidentiality agreement\b/i },
+  { label: "academic transcript", pattern: /\btranscript|gpa|semester|student id\b/i },
+  { label: "curriculum vitae", pattern: /\bcurriculum vitae|resume|cv\b/i },
+  { label: "banking document", pattern: /\bbank statement|iban|account number|swift\b/i },
+  { label: "medical record", pattern: /\bmedical report|diagnosis|patient|hospital\b/i },
+  { label: "identity document", pattern: /\bpassport|national id|identity card|visa\b/i },
+  { label: "legal affidavit", pattern: /\baffidavit|notary|power of attorney\b/i },
+  { label: "student", pattern: /\bstudent\b/i },
+  { label: "university", pattern: /\buniversity|college\b/i },
+  { label: "human resources", pattern: /\bhuman resources|hr\b/i },
+];
+
+const CONSTRUCTION_SIGNALS: ScopeSignal[] = [
+  { label: "construction submittal", pattern: /\bsubmittal\b/i },
+  { label: "construction scope", pattern: /\bconstruction|civil|structural|architectural\b/i },
+  { label: "method statement", pattern: /\bmethod statement\b/i },
+  { label: "shop drawing", pattern: /\bshop drawing\b/i },
+  { label: "material data", pattern: /\bmaterial submittal|product data|technical data sheet\b/i },
+  { label: "construction testing", pattern: /\btest report|mill certificate|mix design\b/i },
+  { label: "construction standards", pattern: /\bqcs|astm|bs|en|iso|nfpa\b/i },
+  { label: "construction approvals", pattern: /\bqcdd|qcd|civil defence\b/i },
+];
+
+const CONSTRUCTION_KEYWORD_PATTERN =
+  /\b(submittal|construction|civil|architectural|structural|method statement|shop drawing|product data|technical data sheet|concrete|cement|steel|masonry|mortar|asphalt|aggregate|pipe|valve|cable|earthing|fire|life safety|qcdd|qcd|mix design|test report|mill certificate|qcs|astm|nfpa|bs|en|iso)\b/i;
+
 function cleanClauseTitle(title: string): string {
   return title.replace(/\s*\.{3,}\s*\d+\s*$/, "").trim();
+}
+
+function collectSignalMatches(text: string, signals: ScopeSignal[]): string[] {
+  return signals
+    .filter((signal) => signal.pattern.test(text))
+    .map((signal) => signal.label);
+}
+
+function assessDocumentScope(
+  analysis: SubmittalAnalysis | null,
+  rawText: string
+): {
+  isOutOfScope: boolean;
+  nonConstructionSignals: string[];
+  constructionSignals: string[];
+  hasStructuredConstructionEvidence: boolean;
+  outOfScopeScore: number;
+  inScopeScore: number;
+} {
+  const materialsText = analysis
+    ? analysis.materials
+        .map((m) =>
+          [m.name, m.manufacturer ?? "", m.supplier ?? "", m.standard ?? ""].join(" ")
+        )
+        .join(" ")
+    : "";
+  const certificatesText = analysis
+    ? analysis.certificates
+        .map((c) => [c.type, c.issuer ?? "", c.reference ?? ""].join(" "))
+        .join(" ")
+    : "";
+  const testsText = analysis
+    ? analysis.testResults
+        .map((t) => [t.test, t.result, t.requirement ?? ""].join(" "))
+        .join(" ")
+    : "";
+
+  const analysisText = analysis
+    ? [
+        analysis.title,
+        analysis.project ?? "",
+        analysis.contractor ?? "",
+        analysis.keyFindings.join(" "),
+        analysis.standardsCited.join(" "),
+        materialsText,
+        certificatesText,
+        testsText,
+      ].join(" ")
+    : "";
+  const combinedText = `${analysisText}\n${rawText.slice(0, 6000)}`;
+
+  const nonConstructionSignals = collectSignalMatches(
+    combinedText,
+    NON_CONSTRUCTION_SIGNALS
+  );
+  const constructionSignals = collectSignalMatches(
+    combinedText,
+    CONSTRUCTION_SIGNALS
+  );
+
+  const hasConstructionStandards = Boolean(
+    analysis?.standardsCited.some((s) => CONSTRUCTION_KEYWORD_PATTERN.test(s))
+  );
+  const hasConstructionMaterials = Boolean(
+    analysis?.materials.some((m) =>
+      CONSTRUCTION_KEYWORD_PATTERN.test(
+        `${m.name} ${m.standard ?? ""} ${m.properties.map((p) => `${p.key} ${p.value}`).join(" ")}`
+      )
+    )
+  );
+  const hasConstructionCertificates = Boolean(
+    analysis?.certificates.some((c) =>
+      CONSTRUCTION_KEYWORD_PATTERN.test(
+        `${c.type} ${c.issuer ?? ""} ${c.reference ?? ""}`
+      )
+    )
+  );
+  const hasConstructionTests = Boolean(
+    analysis?.testResults.some((t) =>
+      CONSTRUCTION_KEYWORD_PATTERN.test(`${t.test} ${t.result} ${t.requirement ?? ""}`)
+    )
+  );
+  const hasConstructionInRawText = CONSTRUCTION_KEYWORD_PATTERN.test(combinedText);
+  const knownConstructionDocType = Boolean(
+    analysis && analysis.documentType !== "other"
+  );
+
+  const hasStructuredConstructionEvidence = Boolean(
+    analysis &&
+      (
+        hasConstructionMaterials ||
+        hasConstructionTests ||
+        hasConstructionCertificates ||
+        hasConstructionStandards ||
+        analysis.drsItems.length > 0
+      )
+  );
+
+  const titleLooksNonConstruction = Boolean(
+    analysis &&
+      /\binternship|employment|cv|resume|confidentiality|passport|visa|bank statement|medical\b/i.test(
+        analysis.title
+      )
+  );
+  const otherType = analysis?.documentType === "other";
+
+  const outOfScopeScore =
+    (otherType ? 2 : 0) +
+    (!knownConstructionDocType ? 1 : 0) +
+    (!hasStructuredConstructionEvidence ? 2 : 0) +
+    (nonConstructionSignals.length >= 1 ? 2 : 0) +
+    (nonConstructionSignals.length >= 3 ? 1 : 0) +
+    (!hasConstructionInRawText ? 1 : 0);
+
+  const inScopeScore =
+    (knownConstructionDocType ? 2 : 0) +
+    (hasStructuredConstructionEvidence ? 4 : 0) +
+    (constructionSignals.length >= 1 ? 2 : 0) +
+    (constructionSignals.length >= 3 ? 1 : 0) +
+    (hasConstructionInRawText ? 1 : 0);
+
+  const isOutOfScope =
+    (
+      (titleLooksNonConstruction && !hasStructuredConstructionEvidence) ||
+      (outOfScopeScore >= 5 && outOfScopeScore > inScopeScore + 1)
+    );
+
+  return {
+    isOutOfScope,
+    nonConstructionSignals,
+    constructionSignals,
+    hasStructuredConstructionEvidence,
+    outOfScopeScore,
+    inScopeScore,
+  };
+}
+
+function isOutOfScopeReviewText(text: string): boolean {
+  const hasRejectedVerdict =
+    /###\s*VERDICT[\s\S]{0,80}\bREJECTED\b/i.test(text) || /\bREJECTED\b/i.test(text);
+  if (!hasRejectedVerdict) return false;
+
+  return /\bout[-\s]of[-\s]scope\b|\boutside the scope\b|\bnot a construction submittal\b|\bunrelated to construction\b|\bqcs .* not applicable\b|\bnon-construction document\b/i.test(
+    text
+  );
 }
 
 function chunkText(text: string, chunkSize: number = RESPONSE_CHUNK_SIZE): string[] {
@@ -426,6 +605,40 @@ This response is fail-closed: a compliance verdict cannot be approved without gr
             console.error("Deterministic analysis failed:", err);
           }
 
+          const scopeAssessment = assessDocumentScope(
+            analysis,
+            pdfExtraction.rawText ?? ""
+          );
+          if (scopeAssessment.isOutOfScope) {
+            writeReviewStage(writer, "drafting");
+            const signalSummary =
+              scopeAssessment.nonConstructionSignals.length > 0
+                ? scopeAssessment.nonConstructionSignals.join(", ")
+                : "non-construction indicators";
+            const outOfScope = `### VERDICT
+REJECTED
+
+### DOCUMENT OVERVIEW
+The uploaded file appears to be a non-construction document and is outside the scope of QCS submittal compliance review.
+
+### SUMMARY
+The document is not a construction submittal, so QCS clause-by-clause compliance checking is not applicable. The request is rejected as out-of-scope for this reviewer.
+
+### DETAILED ANALYSIS
+1. Document signals indicate non-construction context (${signalSummary}).
+2. The extracted content does not provide structured construction-submittal evidence (materials, test reports, certificates, or DRS items).
+3. Because the file is out-of-scope, QCS clause citations are intentionally omitted.
+4. A standards-based compliance review can proceed only after a relevant construction submittal is uploaded.
+
+### RECOMMENDATIONS
+- Upload a construction-related document (for example: material submittal, method statement, mix design, test report, shop drawing, or product certificate).
+- If this upload was accidental, replace it with the intended project submittal PDF.`;
+            await writeReportToStream(writer, outOfScope, []);
+            writer.write({ type: "finish-step" } as any);
+            writer.write({ type: "finish", finishReason: "stop" } as any);
+            return;
+          }
+
           writeReviewStage(writer, "retrieving");
           const queries = buildDeterministicQueries(analysis);
           const rawResultsNested = await Promise.all(
@@ -539,6 +752,7 @@ ${evidence}`;
           });
 
           let textStarted = false;
+          let generatedReviewText = "";
           try {
             const reportResult = streamText({
               model: google("gemini-2.5-flash"),
@@ -566,6 +780,7 @@ ${evidence}`;
                   writer.write({ type: "text-start", id: "text-1" } as any);
                   textStarted = true;
                 }
+                generatedReviewText += part.text;
                 writer.write({ type: "text-delta", id: "text-1", delta: part.text } as any);
               }
             }
@@ -590,6 +805,7 @@ The review could not complete full narrative generation, but grounded evidence i
 - Update all legacy references to QCS 2024.
 - Provide explicit product approvals/certifications where required.
 - Re-submit with clear clause-level compliance statements.`;
+            generatedReviewText += fallbackBody;
             if (!textStarted) {
               writer.write({ type: "text-start", id: "text-1" } as any);
               textStarted = true;
@@ -602,7 +818,9 @@ The review could not complete full narrative generation, but grounded evidence i
           }
 
           // Append citation section after streamed report
-          const citationText = buildCitationSection(refs);
+          const citationText = isOutOfScopeReviewText(generatedReviewText)
+            ? ""
+            : buildCitationSection(refs);
           if (citationText) {
             writer.write({ type: "text-delta", id: "text-1", delta: `\n\n${citationText}` } as any);
           }
