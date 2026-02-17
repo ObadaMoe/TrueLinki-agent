@@ -111,11 +111,16 @@ async function renderPage(
  * conflicts with unpdf's bundled copy).
  */
 async function loadPdf(pdfBytes: Uint8Array) {
+  // Pre-load the worker module and register it on globalThis so pdfjs-dist
+  // uses it directly (line 21702 in pdf.mjs checks globalThis.pdfjsWorker).
+  // This avoids a dynamic import(workerSrc) which fails in bundled environments
+  // (Vercel/Turbopack) where the worker file isn't traced as a dependency.
+  const workerModule = await import(
+    "pdfjs-dist/legacy/build/pdf.worker.mjs"
+  );
+  (globalThis as any).pdfjsWorker = workerModule;
+
   const pdfjsLib = await import("pdfjs-dist/legacy/build/pdf.mjs");
-  // Point to the matching worker file so pdfjs runs on the main thread
-  // without spawning a Web Worker (Node.js "fake worker" mode).
-  pdfjsLib.GlobalWorkerOptions.workerSrc =
-    "pdfjs-dist/legacy/build/pdf.worker.mjs";
 
   return pdfjsLib
     .getDocument({
