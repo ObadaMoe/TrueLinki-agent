@@ -117,31 +117,18 @@ function injectPDFContent(
           `EXTRACTED TEXT:\n${extraction.rawText}`,
       });
 
-      // For scanned PDFs, include key page images so the main model can
-      // visually reason about the document (analyzer alone isn't enough
-      // for the final review). Limit to first 5 pages to control tokens.
-      if (extraction.isScanned) {
-        const maxMainImages = 5;
-        let imageCount = 0;
-        for (const page of extraction.pages) {
-          if (page.imageDataUrl && imageCount < maxMainImages) {
-            newContent.push({
-              type: "text",
-              text: `\n[Page ${page.pageNumber} scan:]`,
-            });
-            const mediaType = page.imageMediaType ?? "image/jpeg";
-            const base64Data = page.imageDataUrl.replace(
-              /^data:image\/[a-z]+;base64,/,
-              ""
-            );
-            newContent.push({
-              type: "file",
-              data: base64Data,
-              mediaType,
-            });
-            imageCount++;
-          }
-        }
+      // For scanned PDFs, send the raw PDF directly to GPT-4o (which
+      // supports native PDF input) instead of garbled canvas renders.
+      if (extraction.isScanned && extraction.pdfBase64) {
+        newContent.push({
+          type: "text",
+          text: `\n[Attached: Full PDF document for visual analysis]`,
+        });
+        newContent.push({
+          type: "file",
+          data: extraction.pdfBase64,
+          mediaType: "application/pdf",
+        });
       }
     } else {
       newContent.push(part as any);

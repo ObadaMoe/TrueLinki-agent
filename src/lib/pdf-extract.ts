@@ -13,6 +13,8 @@ export interface PDFExtractionResult {
   rawText: string;
   filename?: string;
   isScanned: boolean;
+  /** Raw PDF as base64 string (for sending directly to GPT-4o for scanned PDFs) */
+  pdfBase64?: string;
 }
 
 const MAX_TEXT_CHARS = 50_000;
@@ -199,21 +201,24 @@ export async function extractPDF(
   const totalTextLength = pageTexts.reduce((s, t) => s + t.length, 0);
   const isScanned = totalTextLength < 100;
 
-  // Select pages for image rendering
-  const imagePagesNumbers = selectPagesForImages(
-    pageTexts,
-    maxImagePages,
-    isScanned
-  );
-
-  // Render selected pages as images
+  // For scanned PDFs, skip canvas rendering (pdfjs-dist produces garbled
+  // output for scanner-embedded images like JBIG2/CCITT). Instead, we'll
+  // send the raw PDF directly to GPT-4o which handles PDFs natively.
+  // For text-based PDFs, render key pages as images for visual context.
   const imageMap = new Map<number, { dataUrl: string; mediaType: string }>();
-  for (const pageNum of imagePagesNumbers) {
-    try {
-      const result = await renderPage(pdf, pageNum, imageScale, imageFormat);
-      imageMap.set(pageNum, result);
-    } catch (err) {
-      console.warn(`Failed to render page ${pageNum} as image:`, err);
+  if (!isScanned) {
+    const imagePagesNumbers = selectPagesForImages(
+      pageTexts,
+      maxImagePages,
+      false
+    );
+    for (const pageNum of imagePagesNumbers) {
+      try {
+        const result = await renderPage(pdf, pageNum, imageScale, imageFormat);
+        imageMap.set(pageNum, result);
+      } catch (err) {
+        console.warn(`Failed to render page ${pageNum} as image:`, err);
+      }
     }
   }
 
@@ -235,7 +240,7 @@ export async function extractPDF(
   if (isScanned) {
     rawText =
       `[This is a scanned/image-based PDF with ${pageTexts.length} pages. ` +
-      `Text extraction returned no content. Analysis relies entirely on page images.]`;
+      `Text extraction returned no content. The raw PDF file is attached for visual analysis.]`;
   } else {
     rawText = pageTexts
       .map((text, idx) => `--- PAGE ${idx + 1} ---\n${text}`)
@@ -254,5 +259,7 @@ export async function extractPDF(
     rawText,
     filename,
     isScanned,
+    // Keep raw PDF base64 for scanned documents so it can be sent directly to GPT-4o
+    pdfBase64: isScanned ? base64Match[1] : undefined,
   };
 }

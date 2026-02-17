@@ -172,24 +172,36 @@ export async function analyzeSubmittalContent(
     text: `DOCUMENT: "${extraction.filename ?? "submittal.pdf"}" (${extraction.totalPages} pages)\n\nEXTRACTED TEXT:\n${extraction.rawText}`,
   });
 
-  // Add page images as FilePart for visual analysis
-  for (const page of extraction.pages) {
-    if (page.imageDataUrl) {
-      contentParts.push({
-        type: "text",
-        text: `\n--- PAGE ${page.pageNumber} IMAGE (visual scan) ---`,
-      });
-      // Extract base64 data from data URL (strip "data:<mediaType>;base64," prefix)
-      const mediaType = page.imageMediaType ?? "image/png";
-      const base64Data = page.imageDataUrl.replace(
-        /^data:image\/[a-z]+;base64,/,
-        ""
-      );
-      contentParts.push({
-        type: "file",
-        data: base64Data,
-        mediaType,
-      });
+  // For scanned PDFs, send the raw PDF directly to GPT-4o (native PDF support).
+  // For text-based PDFs, send rendered page images for visual context.
+  if (extraction.isScanned && extraction.pdfBase64) {
+    contentParts.push({
+      type: "text",
+      text: `\n[Attached: Full PDF document for visual analysis — ${extraction.totalPages} pages]`,
+    });
+    contentParts.push({
+      type: "file",
+      data: extraction.pdfBase64,
+      mediaType: "application/pdf",
+    });
+  } else {
+    for (const page of extraction.pages) {
+      if (page.imageDataUrl) {
+        contentParts.push({
+          type: "text",
+          text: `\n--- PAGE ${page.pageNumber} IMAGE (visual scan) ---`,
+        });
+        const mediaType = page.imageMediaType ?? "image/png";
+        const base64Data = page.imageDataUrl.replace(
+          /^data:image\/[a-z]+;base64,/,
+          ""
+        );
+        contentParts.push({
+          type: "file",
+          data: base64Data,
+          mediaType,
+        });
+      }
     }
   }
 
