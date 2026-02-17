@@ -1,4 +1,3 @@
-import { extractText, getDocumentProxy } from "unpdf";
 import { createCanvas } from "@napi-rs/canvas";
 
 export interface ExtractedPage {
@@ -19,7 +18,7 @@ const MAX_TEXT_CHARS = 50_000;
 
 /**
  * Custom CanvasFactory for pdfjs-dist that uses @napi-rs/canvas.
- * Required because unpdf's bundled pdfjs stubs out @napi-rs/canvas.
+ * Required because pdfjs-dist has no built-in canvas support in Node.js.
  */
 class NodeCanvasFactory {
   create(width: number, height: number) {
@@ -87,8 +86,8 @@ function selectPagesForImages(
 }
 
 /**
- * Render a single PDF page to a PNG data URL using pdfjs-dist directly
- * with @napi-rs/canvas (bypasses unpdf's broken bundled canvas factory).
+ * Render a single PDF page to a PNG data URL using pdfjs-dist
+ * with @napi-rs/canvas.
  */
 async function renderPage(
   pdf: any,
@@ -108,7 +107,51 @@ async function renderPage(
 }
 
 /**
+ * Load PDF with pdfjs-dist (the only pdfjs library used — avoids version
+ * conflicts with unpdf's bundled copy).
+ */
+async function loadPdf(pdfBytes: Uint8Array) {
+  const pdfjsLib = await import("pdfjs-dist/legacy/build/pdf.mjs");
+  // Point to the matching worker file so pdfjs runs on the main thread
+  // without spawning a Web Worker (Node.js "fake worker" mode).
+  pdfjsLib.GlobalWorkerOptions.workerSrc =
+    "pdfjs-dist/legacy/build/pdf.worker.mjs";
+
+  return pdfjsLib
+    .getDocument({
+      data: pdfBytes,
+      verbosity: 0,
+      isEvalSupported: false,
+      canvasFactory: new NodeCanvasFactory() as any,
+    } as any)
+    .promise;
+}
+
+/**
+ * Extract text from all pages using pdfjs-dist's getTextContent API.
+ */
+async function extractTextFromPages(pdf: any): Promise<string[]> {
+  const numPages = pdf.numPages;
+  const pageTexts: string[] = [];
+
+  for (let i = 1; i <= numPages; i++) {
+    const page = await pdf.getPage(i);
+    const textContent = await page.getTextContent();
+    const text = textContent.items
+      .filter((item: any) => "str" in item)
+      .map((item: any) => item.str)
+      .join(" ");
+    pageTexts.push(text);
+  }
+
+  return pageTexts;
+}
+
+/**
  * Extract text and render selected pages as images from a base64-encoded PDF.
+ *
+ * Uses pdfjs-dist exclusively (not unpdf) to avoid version conflicts between
+ * pdfjs-dist and unpdf's bundled pdfjs copy.
  */
 export async function extractPDF(
   dataUrl: string,
@@ -129,11 +172,11 @@ export async function extractPDF(
   }
   const pdfBytes = new Uint8Array(Buffer.from(base64Match[1], "base64"));
 
-  // Get document proxy (uses unpdf's pdfjs for text extraction — works fine)
-  const pdf = await getDocumentProxy(pdfBytes, { verbosity: 0 });
+  // Load PDF with pdfjs-dist
+  const pdf = await loadPdf(pdfBytes);
 
   // Extract text from all pages
-  const { text: pageTexts } = await extractText(pdf, { mergePages: false });
+  const pageTexts = await extractTextFromPages(pdf);
 
   // Detect scanned/image-based PDF
   const totalTextLength = pageTexts.reduce((s, t) => s + t.length, 0);
@@ -146,29 +189,18 @@ export async function extractPDF(
     isScanned
   );
 
-  // Load PDF again with pdfjs-dist directly for rendering (with custom canvas factory)
-  const pdfjsLib = await import("pdfjs-dist/legacy/build/pdf.mjs");
-  const renderPdf = await pdfjsLib
-    .getDocument({
-      data: pdfBytes.slice(),
-      verbosity: 0,
-      canvasFactory: new NodeCanvasFactory() as any,
-    } as any)
-    .promise;
-
   // Render selected pages as images
   const imageMap = new Map<number, string>();
   for (const pageNum of imagePagesNumbers) {
     try {
-      const imgDataUrl = await renderPage(renderPdf, pageNum, imageScale);
+      const imgDataUrl = await renderPage(pdf, pageNum, imageScale);
       imageMap.set(pageNum, imgDataUrl);
     } catch (err) {
       console.warn(`Failed to render page ${pageNum} as image:`, err);
     }
   }
 
-  await pdf.destroy();
-  renderPdf.destroy();
+  pdf.destroy();
 
   // Build pages array
   const pages: ExtractedPage[] = pageTexts.map((text, idx) => ({
