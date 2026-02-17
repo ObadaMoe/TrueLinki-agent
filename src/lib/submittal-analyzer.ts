@@ -205,8 +205,11 @@ export async function analyzeSubmittalContent(
     }
   }
 
+  // Use gpt-4o for scanned PDFs (needs vision), gpt-4o-mini for text-based (faster & cheaper)
+  const modelId = extraction.isScanned ? "gpt-4o" : "gpt-4o-mini";
+
   const { object } = await generateObject({
-    model: openai("gpt-4o"),
+    model: openai(modelId),
     schema: SubmittalAnalysisSchema,
     system: ANALYSIS_PROMPT,
     messages: [{ role: "user", content: contentParts }],

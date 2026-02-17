@@ -109,27 +109,18 @@ function injectPDFContent(
       "mediaType" in part &&
       (part as any).mediaType === "application/pdf"
     ) {
-      // Replace raw PDF with extracted text
+      // Replace the raw PDF file part with a text summary.
+      // The actual PDF content will be analyzed by the analyzeSubmittal tool
+      // (which has its own GPT-4o call) — we don't need to send it again
+      // in the main conversation context, which would double token usage.
       newContent.push({
         type: "text",
         text:
-          `[PDF Document: "${extraction.filename ?? "submittal.pdf"}" — ${extraction.totalPages} pages]\n\n` +
+          `[PDF Document: "${extraction.filename ?? "submittal.pdf"}" — ${extraction.totalPages} pages` +
+          (extraction.isScanned ? ", scanned/image-based" : "") +
+          `]\n\n` +
           `EXTRACTED TEXT:\n${extraction.rawText}`,
       });
-
-      // For scanned PDFs, send the raw PDF directly to GPT-4o (which
-      // supports native PDF input) instead of garbled canvas renders.
-      if (extraction.isScanned && extraction.pdfBase64) {
-        newContent.push({
-          type: "text",
-          text: `\n[Attached: Full PDF document for visual analysis]`,
-        });
-        newContent.push({
-          type: "file",
-          data: extraction.pdfBase64,
-          mediaType: "application/pdf",
-        });
-      }
     } else {
       newContent.push(part as any);
     }
@@ -225,7 +216,26 @@ export async function POST(req: Request) {
             }
             return { error: "No PDF document was uploaded with this message." };
           }
-          return await analyzeSubmittalContent(pdfExtraction);
+          try {
+            return await analyzeSubmittalContent(pdfExtraction);
+          } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            console.error("Submittal analysis failed:", msg);
+            // Return a partial result so the LLM can still attempt a review
+            return {
+              error: `Analysis failed: ${msg.includes("rate_limit") ? "OpenAI rate limit exceeded. The document may be too large." : msg}`,
+              documentType: "other",
+              title: pdfExtraction.filename ?? "submittal.pdf",
+              pageCount: pdfExtraction.totalPages,
+              isScanned: pdfExtraction.isScanned,
+              rawText: pdfExtraction.rawText.slice(0, 2000),
+              suggestedQCSQueries: [
+                "general submittal documentation requirements",
+                "material testing and certification requirements",
+                "construction material standards compliance",
+              ],
+            };
+          }
         },
       }),
 

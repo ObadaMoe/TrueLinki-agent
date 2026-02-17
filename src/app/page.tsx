@@ -72,6 +72,8 @@ import {
   NetworkIcon,
   DatabaseIcon,
   LoaderIcon,
+  AlertCircleIcon,
+  RefreshCwIcon,
 } from "lucide-react";
 
 const BRAND_LOGO_SRC = "/cb.svg";
@@ -506,7 +508,7 @@ export default function Home() {
     []
   );
 
-  const { messages, setMessages, sendMessage, status, stop } = useChat({
+  const { messages, setMessages, sendMessage, status, stop, error, regenerate } = useChat({
     transport,
   });
 
@@ -750,6 +752,36 @@ export default function Home() {
                             ? "Processing document..."
                             : "Thinking..."}
                         </Shimmer>
+                      </div>
+                    </MessageContent>
+                  </Message>
+                )}
+                {error && (
+                  <Message from="assistant">
+                    <MessageContent>
+                      <div className="flex items-center gap-3 rounded-lg border border-red-500/20 bg-red-500/5 p-3">
+                        <AlertCircleIcon className="h-5 w-5 shrink-0 text-red-500" />
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-medium text-red-600 dark:text-red-400">
+                            Something went wrong
+                          </p>
+                          <p className="text-xs text-muted-foreground mt-0.5">
+                            {error.message.includes("rate_limit")
+                              ? "The document is too large for the current API rate limit. Try a smaller file or wait a moment."
+                              : error.message.includes("413")
+                                ? "The uploaded file is too large. Please try a smaller document."
+                                : "An error occurred while processing your request. Please try again."}
+                          </p>
+                        </div>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => regenerate()}
+                          className="shrink-0 gap-1.5 text-xs"
+                        >
+                          <RefreshCwIcon className="h-3 w-3" />
+                          Retry
+                        </Button>
                       </div>
                     </MessageContent>
                   </Message>
