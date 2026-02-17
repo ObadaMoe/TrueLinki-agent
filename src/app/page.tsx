@@ -236,6 +236,54 @@ const VERDICT_CONFIG = {
     icon: AlertTriangleIcon,
   },
 } as const;
+const MAX_DISPLAY_SOURCES = 20;
+const INITIAL_DOCUMENT_STAGE_LABEL = "Stage 1/5: Upload received";
+
+function sanitizeAssistantText(text: string): string {
+  const trimmed = text.replace(/\r\n/g, "\n").trimStart();
+  if (!trimmed) return text;
+
+  // Remove accidental duplicated leading verdict line, e.g.:
+  // "NEEDS REVISION\n### VERDICT"
+  const deDupedLeadingVerdict = trimmed.replace(
+    /^\s*(?:\*{0,2})?(APPROVED|REJECTED|NEEDS\s+REVISION)(?:\*{0,2})?\s*\n+(?=\s*(?:###\s*)?VERDICT\b)/i,
+    ""
+  );
+
+  const verdictMatch = /(?:^|\n)(?:###\s*)?VERDICT\b/i.exec(
+    deDupedLeadingVerdict
+  );
+  if (!verdictMatch || verdictMatch.index === undefined) {
+    return deDupedLeadingVerdict;
+  }
+
+  const verdictIdx = verdictMatch.index;
+  if (verdictIdx === 0) return deDupedLeadingVerdict;
+
+  const prefix = deDupedLeadingVerdict.slice(0, verdictIdx);
+  const noiseLines = prefix
+    .split("\n")
+    .map((l) => l.trim())
+    .filter(Boolean);
+  const noiseCount = noiseLines.filter(
+    (l) =>
+      /^QCS 2024 Section/i.test(l) ||
+      /^Used \d+ QCS sections?/i.test(l) ||
+      l === "graph"
+  ).length;
+
+  // If the model leaked a raw retrieval preamble, keep only the structured report.
+  if (noiseCount >= 3) {
+    return deDupedLeadingVerdict
+      .slice(verdictIdx)
+      .split("\n")
+      .filter((line) => line.trim().toLowerCase() !== "graph")
+      .join("\n")
+      .trimStart();
+  }
+
+  return deDupedLeadingVerdict;
+}
 
 function getVerdictInfo(text: string) {
   const upper = text.toUpperCase();
@@ -261,30 +309,129 @@ interface QCSSource {
   source: "vector" | "graph";
 }
 
+type ToolPart = Record<string, unknown> & {
+  type?: string;
+  toolName?: string;
+  state?: string;
+  output?: unknown;
+  toolInvocation?: {
+    toolName?: string;
+    state?: string;
+    result?: unknown;
+  };
+};
+
+function getToolName(part: ToolPart): string | null {
+  if (typeof part.toolName === "string") return part.toolName;
+  if (part.toolInvocation && typeof part.toolInvocation.toolName === "string") {
+    return part.toolInvocation.toolName;
+  }
+  if (
+    typeof part.type === "string" &&
+    part.type.startsWith("tool-") &&
+    part.type !== "tool-invocation"
+  ) {
+    return part.type.slice(5);
+  }
+  return null;
+}
+
+function getToolOutput(part: ToolPart): unknown {
+  if (part.output !== undefined) return part.output;
+  if (part.toolInvocation?.state === "result") {
+    return part.toolInvocation.result;
+  }
+  return undefined;
+}
+
 function parseQCSSources(message: UIMessage): QCSSource[] {
   const sources: QCSSource[] = [];
   for (const part of message.parts) {
-    if (part.type.startsWith("tool-") && "state" in part && part.state === "output-available") {
-      const result = (part as any).output;
-      if (Array.isArray(result)) {
-        for (const item of result) {
-          if (item.reference) {
-            sources.push({
-              reference: item.reference,
-              score: item.relevanceScore ?? 0,
-              source: item.source === "graph" ? "graph" : "vector",
-            });
-          }
+    if (part.type === "source-url") {
+      const sourcePart = part as {
+        type: "source-url";
+        title?: string;
+        sourceId?: string;
+      };
+      if (sourcePart.title && sourcePart.title.trim().length > 0) {
+        const source =
+          sourcePart.sourceId?.startsWith("graph-") ? "graph" : "vector";
+        sources.push({
+          reference: sourcePart.title,
+          score: 0,
+          source,
+        });
+      }
+      continue;
+    }
+
+    const toolPart = part as ToolPart;
+    const toolName = getToolName(toolPart);
+    if (toolName !== "retrieveQCSSpecs") continue;
+
+    const result = getToolOutput(toolPart);
+    if (!Array.isArray(result)) continue;
+
+    for (const item of result) {
+      if (typeof item !== "object" || !item) continue;
+      const ref = (item as { reference?: unknown }).reference;
+      if (typeof ref === "string" && ref.trim().length > 0) {
+        const relevance = (item as { relevanceScore?: unknown }).relevanceScore;
+        const source = (item as { source?: unknown }).source;
+        const normalizedSource = source === "graph" ? "graph" : "vector";
+
+        // Hide low-value graph-only boilerplate headings in the UI source list.
+        if (
+          normalizedSource === "graph" &&
+          /\bclause\s+\d+(?:\.\d+)?\s*:\s*(scope|references|introduction)\b/i.test(ref)
+        ) {
+          continue;
         }
+
+        sources.push({
+          reference: ref,
+          score: typeof relevance === "number" ? relevance : 0,
+          source: normalizedSource,
+        });
       }
     }
   }
   const seen = new Set<string>();
-  return sources.filter((s) => {
+  const deduped = sources.filter((s) => {
     if (seen.has(s.reference)) return false;
     seen.add(s.reference);
     return true;
   });
+
+  deduped.sort((a, b) => {
+    if (a.source !== b.source) return a.source === "vector" ? -1 : 1;
+    return b.score - a.score;
+  });
+
+  return deduped.slice(0, MAX_DISPLAY_SOURCES);
+}
+
+function getReviewStageLabel(message: UIMessage): string | null {
+  for (let i = message.parts.length - 1; i >= 0; i--) {
+    const part = message.parts[i] as { type?: string; data?: unknown };
+    if (part.type !== "data-review-stage") continue;
+    if (!part.data || typeof part.data !== "object") continue;
+    const label = (part.data as { label?: unknown }).label;
+    if (typeof label === "string" && label.trim().length > 0) {
+      return label;
+    }
+  }
+  return null;
+}
+
+function getLatestReviewStage(messages: UIMessage[]): string | null {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const msg = messages[i];
+    if (msg.role !== "assistant") continue;
+    const label = getReviewStageLabel(msg);
+    if (label) return label;
+  }
+  return null;
 }
 
 // ---------------------------------------------------------------------------
@@ -299,24 +446,57 @@ function ChatMessages({ messages, status }: { messages: UIMessage[]; status: str
       {messages.map((message) => {
         const isUser = message.role === "user";
         const textParts = message.parts.filter((p) => p.type === "text");
-        const fullText = textParts
+        const rawText = textParts
           .map((p) => (p as { type: "text"; text: string }).text)
           .join("");
-        const toolParts = message.parts.filter((p) => p.type.startsWith("tool-"));
+        const fullText = isUser ? rawText : sanitizeAssistantText(rawText);
+        const toolParts = message.parts.filter(
+          (p) => typeof p.type === "string" && p.type.startsWith("tool-")
+        );
         const fileParts = message.parts.filter((p) => p.type === "file");
+        const hasOnlyImageFiles =
+          fileParts.length > 0 &&
+          fileParts.every(
+            (p) =>
+              "mediaType" in p &&
+              typeof (p as { mediaType?: unknown }).mediaType === "string" &&
+              (p as { mediaType: string }).mediaType.startsWith("image/")
+          );
+        const userAttachmentVariant = hasOnlyImageFiles ? "grid" : "list";
         const verdict = !isUser ? getVerdictInfo(fullText) : null;
         const qcsSources = !isUser ? parseQCSSources(message) : [];
+        const toolNames = toolParts
+          .map((p) => getToolName(p as ToolPart))
+          .filter((name): name is string => Boolean(name));
+        const hasAnalysisTool = toolNames.includes("analyzeSubmittal");
+        const hasRetrieveTool = toolNames.includes("retrieveQCSSpecs");
+        const backendStageLabel = !isUser ? getReviewStageLabel(message) : null;
         const isLastAssistant =
           !isUser && message.id === messages[messages.length - 1]?.id;
 
         return (
           <Message key={message.id} from={message.role}>
             {isUser && fileParts.length > 0 && (
-              <Attachments variant="grid">
+              <Attachments
+                variant={userAttachmentVariant}
+                className={
+                  userAttachmentVariant === "list"
+                    ? "ml-auto w-full max-w-md"
+                    : undefined
+                }
+              >
                 {fileParts.map((part, idx) => (
-                  <Attachment key={idx} data={part as any}>
+                  <Attachment
+                    key={idx}
+                    data={part as any}
+                    className={
+                      userAttachmentVariant === "list"
+                        ? "bg-accent/15 border-border/70"
+                        : undefined
+                    }
+                  >
                     <AttachmentPreview />
-                    <AttachmentInfo />
+                    <AttachmentInfo showMediaType={userAttachmentVariant !== "grid"} />
                   </Attachment>
                 ))}
               </Attachments>
@@ -327,12 +507,9 @@ function ChatMessages({ messages, status }: { messages: UIMessage[]; status: str
                 <div className="whitespace-pre-wrap">{fullText}</div>
               ) : (
                 <>
-                  {toolParts.length > 0 && (() => {
+                  {(toolParts.length > 0 || qcsSources.length > 0) && (() => {
                     const graphCount = qcsSources.filter((s) => s.source === "graph").length;
                     const hasGraphSources = graphCount > 0;
-                    const hasAnalysisTool = toolParts.some(
-                      (p) => (p as any).toolName === "analyzeSubmittal"
-                    );
                     return (
                       <div className="flex flex-col gap-1.5 mb-3">
                         {hasAnalysisTool && (
@@ -341,22 +518,24 @@ function ChatMessages({ messages, status }: { messages: UIMessage[]; status: str
                             <span>Analyzed PDF submittal document</span>
                           </div>
                         )}
-                        <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                          {hasGraphSources ? (
-                            <NetworkIcon className="h-3 w-3" />
-                          ) : (
-                            <SearchIcon className="h-3 w-3" />
-                          )}
-                          <span>
-                            Searched QCS 2024 knowledge base
-                            {hasGraphSources && (
-                              <span className="ml-1.5 inline-flex items-center gap-1 rounded-full bg-violet-500/10 px-1.5 py-0.5 text-[10px] font-medium text-violet-600 dark:text-violet-400">
-                                <NetworkIcon className="h-2.5 w-2.5" />
-                                Graph +{graphCount}
-                              </span>
+                        {(hasRetrieveTool || qcsSources.length > 0) && (
+                          <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                            {hasGraphSources ? (
+                              <NetworkIcon className="h-3 w-3" />
+                            ) : (
+                              <SearchIcon className="h-3 w-3" />
                             )}
-                          </span>
-                        </div>
+                            <span>
+                              Searched QCS 2024 knowledge base
+                              {hasGraphSources && (
+                                <span className="ml-1.5 inline-flex items-center gap-1 rounded-full bg-violet-500/10 px-1.5 py-0.5 text-[10px] font-medium text-violet-600 dark:text-violet-400">
+                                  <NetworkIcon className="h-2.5 w-2.5" />
+                                  Graph +{graphCount}
+                                </span>
+                              )}
+                            </span>
+                          </div>
+                        )}
                       </div>
                     );
                   })()}
@@ -366,6 +545,7 @@ function ChatMessages({ messages, status }: { messages: UIMessage[]; status: str
                       <SourcesTrigger count={qcsSources.length}>
                         <span className="font-medium">
                           Used {qcsSources.length} QCS section{qcsSources.length !== 1 ? "s" : ""}
+                          {qcsSources.length === MAX_DISPLAY_SOURCES ? " (top results)" : ""}
                         </span>
                         <svg className="h-3.5 w-3.5 transition-transform [[data-state=open]_&]:rotate-180" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m6 9 6 6 6-6"/></svg>
                       </SourcesTrigger>
@@ -399,26 +579,18 @@ function ChatMessages({ messages, status }: { messages: UIMessage[]; status: str
                     </Badge>
                   )}
 
-                  {isLastAssistant && isStreaming ? (
-                    fullText ? (
-                      <MessageResponse className="agent-response">{fullText}</MessageResponse>
-                    ) : (() => {
-                      const hasAnalyzing = toolParts.some(
-                        (p) => (p as any).toolName === "analyzeSubmittal"
-                      );
-                      const hasSearching = toolParts.some(
-                        (p) => (p as any).toolName === "retrieveQCSSpecs"
-                      );
-                      const label = hasSearching
-                        ? "Comparing against QCS 2024 specifications..."
-                        : hasAnalyzing
-                          ? "Extracting document structure..."
-                          : "Analyzing submittal...";
-                      return <Shimmer className="w-full">{label}</Shimmer>;
-                    })()
-                  ) : fullText ? (
+                  {fullText ? (
                     <MessageResponse className="agent-response">{fullText}</MessageResponse>
-                  ) : (
+                  ) : (isLastAssistant && isStreaming) ? (() => {
+                    const label = backendStageLabel
+                      ? backendStageLabel
+                      : hasRetrieveTool
+                      ? "Comparing against QCS 2024 specifications..."
+                      : hasAnalysisTool
+                        ? "Extracting document structure..."
+                        : "Analyzing submittal...";
+                    return <Shimmer className="w-full">{label}</Shimmer>;
+                  })() : (
                     <Shimmer className="w-full">Reviewing submittal against QCS 2024...</Shimmer>
                   )}
                 </>
@@ -523,6 +695,13 @@ export default function Home() {
 
   const isLoading = status === "streaming" || status === "submitted";
   const hasMessages = messages.length > 0;
+  const latestReviewStage = useMemo(() => getLatestReviewStage(messages), [messages]);
+  const mostRecentUserMessage = [...messages]
+    .reverse()
+    .find((m) => m.role === "user");
+  const mostRecentUserHasFile =
+    mostRecentUserMessage?.parts?.some((p) => p.type === "file") ?? false;
+  const isSubmittingDocument = status === "submitted" && mostRecentUserHasFile;
 
   // Auto-save messages to active conversation
   useEffect(() => {
@@ -746,10 +925,8 @@ export default function Home() {
                       <div className="flex items-center gap-2.5">
                         <LoaderIcon className="h-4 w-4 animate-spin text-muted-foreground" />
                         <Shimmer className="w-full">
-                          {messages[messages.length - 1]?.parts?.some(
-                            (p) => p.type === "file"
-                          )
-                            ? "Processing document..."
+                          {isSubmittingDocument
+                            ? latestReviewStage ?? INITIAL_DOCUMENT_STAGE_LABEL
                             : "Thinking..."}
                         </Shimmer>
                       </div>

@@ -41,7 +41,17 @@ function readStorage(): StoredConversation[] {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return [];
-    return JSON.parse(raw) as StoredConversation[];
+    const parsed = JSON.parse(raw) as StoredConversation[];
+    return parsed.map((conv) => {
+      if (
+        (!conv.title || conv.title === "New conversation") &&
+        Array.isArray(conv.messages) &&
+        conv.messages.length > 0
+      ) {
+        return { ...conv, title: titleFromMessages(conv.messages) };
+      }
+      return conv;
+    });
   } catch {
     return [];
   }
@@ -91,18 +101,78 @@ function writeStorage(conversations: StoredConversation[]) {
   }
 }
 
-function titleFromMessages(messages: UIMessage[]): string {
+function normalizeTitle(raw: string): string {
+  const cleaned = raw
+    .replace(/\s+/g, " ")
+    .replace(/[_-]+/g, " ")
+    .replace(/\b(?:please\s+)?review\s+(?:the\s+following\s+)?construction\s+submittal(?:\s+against\s+qcs\s+2024\s+requirements)?[:\-]?\s*/i, "")
+    .trim();
+
+  if (!cleaned) return "New conversation";
+  return cleaned.length > TITLE_MAX_LENGTH
+    ? cleaned.slice(0, TITLE_MAX_LENGTH).trimEnd() + "…"
+    : cleaned;
+}
+
+function baseNameFromFilename(filename: string): string {
+  const noExt = filename.replace(/\.[^.]+$/, "");
+  return normalizeTitle(noExt);
+}
+
+function extractFirstUserText(messages: UIMessage[]): string {
   const firstUserMsg = messages.find((m) => m.role === "user");
-  if (!firstUserMsg) return "New conversation";
-  const text = firstUserMsg.parts
+  if (!firstUserMsg) return "";
+  return firstUserMsg.parts
     .filter((p) => p.type === "text")
     .map((p) => (p as { type: "text"; text: string }).text)
     .join(" ")
     .trim();
-  if (!text) return "New conversation";
-  return text.length > TITLE_MAX_LENGTH
-    ? text.slice(0, TITLE_MAX_LENGTH).trimEnd() + "…"
-    : text;
+}
+
+function extractFirstUserFilename(messages: UIMessage[]): string | null {
+  const firstUserMsg = messages.find((m) => m.role === "user");
+  if (!firstUserMsg) return null;
+  const filePart = firstUserMsg.parts.find((p) => p.type === "file") as
+    | { filename?: string }
+    | undefined;
+  if (!filePart?.filename) return null;
+  return filePart.filename;
+}
+
+function extractAssistantVerdict(messages: UIMessage[]): string | null {
+  for (const msg of messages) {
+    if (msg.role !== "assistant") continue;
+    const text = msg.parts
+      .filter((p) => p.type === "text")
+      .map((p) => (p as { type: "text"; text: string }).text)
+      .join(" ");
+    const match = /\b(APPROVED|REJECTED|NEEDS REVISION)\b/i.exec(text);
+    if (match) return match[1].toUpperCase();
+  }
+  return null;
+}
+
+function titleFromMessages(messages: UIMessage[]): string {
+  if (messages.length === 0) return "New conversation";
+
+  const userText = extractFirstUserText(messages);
+  const firstFilename = extractFirstUserFilename(messages);
+  const verdict = extractAssistantVerdict(messages);
+
+  let coreTitle = "";
+  if (firstFilename) {
+    coreTitle = `Review ${baseNameFromFilename(firstFilename)}`;
+  } else if (userText) {
+    coreTitle = normalizeTitle(userText);
+  } else {
+    coreTitle = "New conversation";
+  }
+
+  if (verdict && coreTitle !== "New conversation") {
+    return normalizeTitle(`${verdict} - ${coreTitle}`);
+  }
+
+  return coreTitle;
 }
 
 export function groupConversationsByDate(
