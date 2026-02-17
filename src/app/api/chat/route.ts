@@ -24,7 +24,7 @@ type RagMode = "vector" | "graph";
 const MAX_REFS_PER_QUERY = 6;
 const MAX_GRAPH_REFS_PER_QUERY = 2;
 const MIN_CONTENT_CHARS = 80;
-const MAX_TOTAL_REFS = 12;
+const MAX_TOTAL_REFS = 6;
 const MAX_TOTAL_GRAPH_REFS = 4;
 const MAX_QUERIES = 8;
 const RESPONSE_CHUNK_SIZE = 140;
@@ -565,6 +565,7 @@ Rules:
 - Do NOT fabricate clauses or page numbers.
 - Do NOT include a CITATIONS section (it is appended separately).
 - Keep output concise and structured.
+- Use at most 6 citations total. Do not cite unrelated sections.
 - Sections required exactly in this order:
   1) ### VERDICT
   2) ### DOCUMENT OVERVIEW
@@ -579,17 +580,31 @@ ${analysisSummary}
 Validated QCS evidence:
 ${evidence}`;
 
-          let reportBody = "";
+          // Write source citations to stream (displayed as collapsible UI)
+          refs.forEach((ref, idx) => {
+            writer.write({
+              type: "source-url",
+              sourceId: `${ref.source}-${idx + 1}`,
+              url: "#",
+              title: ref.reference,
+            } as any);
+          });
+
+          writer.write({ type: "text-start", id: "text-1" } as any);
+
           try {
-            const { text } = await generateText({
+            const reportResult = streamText({
               model: google("gemini-2.5-flash"),
               temperature: 0,
               prompt: reportPrompt,
             });
-            reportBody = stripGeneratedCitationSection(text);
+
+            for await (const delta of reportResult.textStream) {
+              writer.write({ type: "text-delta", id: "text-1", delta } as any);
+            }
           } catch (err) {
             console.error("Report generation failed:", err);
-            reportBody = `### VERDICT
+            const fallbackBody = `### VERDICT
 NEEDS REVISION
 
 ### DOCUMENT OVERVIEW
@@ -608,21 +623,16 @@ The review could not complete full narrative generation, but grounded evidence i
 - Update all legacy references to QCS 2024.
 - Provide explicit product approvals/certifications where required.
 - Re-submit with clear clause-level compliance statements.`;
+            writer.write({ type: "text-delta", id: "text-1", delta: fallbackBody } as any);
           }
 
-          if (criticalReasons.length > 0) {
-            if (/###\s*VERDICT[\s\S]*?(?=\n###\s*DOCUMENT OVERVIEW\b)/i.test(reportBody)) {
-              reportBody = reportBody.replace(
-                /###\s*VERDICT[\s\S]*?(?=\n###\s*DOCUMENT OVERVIEW\b)/i,
-                "### VERDICT\nNEEDS REVISION\n"
-              );
-            } else if (!/###\s*VERDICT/i.test(reportBody)) {
-              reportBody = `### VERDICT\nNEEDS REVISION\n\n${reportBody}`;
-            }
+          // Append citation section after streamed report
+          const citationText = buildCitationSection(refs);
+          if (citationText) {
+            writer.write({ type: "text-delta", id: "text-1", delta: `\n\n${citationText}` } as any);
           }
 
-          const finalText = `${reportBody.trim()}\n\n${buildCitationSection(refs)}`;
-          await writeReportToStream(writer, finalText, refs);
+          writer.write({ type: "text-end", id: "text-1" } as any);
           writer.write({ type: "finish-step" } as any);
           writer.write({ type: "finish", finishReason: "stop" } as any);
         } catch (err) {

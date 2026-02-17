@@ -434,40 +434,6 @@ function getLatestReviewStage(messages: UIMessage[]): string | null {
   return null;
 }
 
-function AnimatedMessageResponse({ text }: { text: string }) {
-  const [displayText, setDisplayText] = useState(text);
-  const displayRef = useRef(text);
-
-  useEffect(() => {
-    displayRef.current = displayText;
-  }, [displayText]);
-
-  useEffect(() => {
-    if (displayRef.current === text) return;
-
-    let idx = text.startsWith(displayRef.current) ? displayRef.current.length : 0;
-    if (idx === 0) {
-      setDisplayText("");
-      displayRef.current = "";
-    }
-
-    const stepSize = Math.max(2, Math.ceil(text.length / 110));
-    const timer = window.setInterval(() => {
-      idx = Math.min(idx + stepSize, text.length);
-      const next = text.slice(0, idx);
-      displayRef.current = next;
-      setDisplayText(next);
-      if (idx >= text.length) {
-        window.clearInterval(timer);
-      }
-    }, 20);
-
-    return () => window.clearInterval(timer);
-  }, [text]);
-
-  return <MessageResponse className="agent-response">{displayText}</MessageResponse>;
-}
-
 // ---------------------------------------------------------------------------
 // ChatMessages component
 // ---------------------------------------------------------------------------
@@ -507,8 +473,6 @@ function ChatMessages({ messages, status }: { messages: UIMessage[]; status: str
         const backendStageLabel = !isUser ? getReviewStageLabel(message) : null;
         const isLastAssistant =
           !isUser && message.id === messages[messages.length - 1]?.id;
-        const shouldAnimateFinalAssistantText =
-          !isUser && isLastAssistant && !isStreaming;
 
         return (
           <Message key={message.id} from={message.role}>
@@ -615,28 +579,18 @@ function ChatMessages({ messages, status }: { messages: UIMessage[]; status: str
                     </Badge>
                   )}
 
-                  {isLastAssistant && isStreaming ? (
-                    fullText ? (
-                      <MessageResponse className="agent-response">{fullText}</MessageResponse>
-                    ) : (() => {
-                      const hasAnalyzing = hasAnalysisTool;
-                      const hasSearching = hasRetrieveTool;
-                      const label = backendStageLabel
-                        ? backendStageLabel
-                        : hasSearching
-                        ? "Comparing against QCS 2024 specifications..."
-                        : hasAnalyzing
-                          ? "Extracting document structure..."
-                          : "Analyzing submittal...";
-                      return <Shimmer className="w-full">{label}</Shimmer>;
-                    })()
-                  ) : fullText ? (
-                    shouldAnimateFinalAssistantText ? (
-                      <AnimatedMessageResponse text={fullText} />
-                    ) : (
-                      <MessageResponse className="agent-response">{fullText}</MessageResponse>
-                    )
-                  ) : (
+                  {fullText ? (
+                    <MessageResponse className="agent-response">{fullText}</MessageResponse>
+                  ) : (isLastAssistant && isStreaming) ? (() => {
+                    const label = backendStageLabel
+                      ? backendStageLabel
+                      : hasRetrieveTool
+                      ? "Comparing against QCS 2024 specifications..."
+                      : hasAnalysisTool
+                        ? "Extracting document structure..."
+                        : "Analyzing submittal...";
+                    return <Shimmer className="w-full">{label}</Shimmer>;
+                  })() : (
                     <Shimmer className="w-full">Reviewing submittal against QCS 2024...</Shimmer>
                   )}
                 </>
