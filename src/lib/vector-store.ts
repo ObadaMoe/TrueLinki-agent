@@ -22,6 +22,8 @@ export interface QCSSearchResult {
   pageStart: number;
   pageEnd: number;
   content: string;
+  /** True if this result was discovered via graph traversal, not vector similarity */
+  isGraph: boolean;
 }
 
 /**
@@ -56,6 +58,7 @@ export async function searchQCS(
       pageStart: (r.metadata as any).pageStart || 0,
       pageEnd: (r.metadata as any).pageEnd || 0,
       content: (r.metadata as any).content || "",
+      isGraph: false,
     }));
 }
 
@@ -129,6 +132,7 @@ export async function hybridSearch(
       pageStart: (meta.pageStart as number) || 0,
       pageEnd: (meta.pageEnd as number) || 0,
       content: (meta.content as string) || "",
+      isGraph: true,
     });
   }
 
