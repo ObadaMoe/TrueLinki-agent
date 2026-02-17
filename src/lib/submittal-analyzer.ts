@@ -207,7 +207,7 @@ export async function analyzeSubmittalContent(
 
   // Gemini 2.0 Flash handles both vision (scanned PDFs) and text extraction well
   const { object } = await generateObject({
-    model: google("gemini-2.0-flash"),
+    model: google("gemini-2.5-flash"),
     schema: SubmittalAnalysisSchema,
     system: ANALYSIS_PROMPT,
     messages: [{ role: "user", content: contentParts }],
