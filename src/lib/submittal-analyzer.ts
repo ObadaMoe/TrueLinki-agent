@@ -25,6 +25,8 @@ const ANALYSIS_PROMPT = `You are a construction document analyst specializing in
 ## Suggested QCS Queries
 Based on the materials and specifications found, suggest specific search queries that would retrieve the most relevant QCS 2024 sections. Be specific — e.g., "fire rated steel doors BS 476 requirements" rather than just "steel doors".`;
 
+// OpenAI structured output requires ALL properties in "required" —
+// use .nullable() instead of .optional() so the field is present but can be null.
 export const SubmittalAnalysisSchema = z.object({
   documentType: z
     .enum([
@@ -43,24 +45,28 @@ export const SubmittalAnalysisSchema = z.object({
 
   title: z.string().describe("Document title or subject"),
 
-  contractor: z.string().optional().describe("Contractor name"),
-  project: z.string().optional().describe("Project name"),
-  submittalNumber: z.string().optional().describe("Submittal reference number"),
-  revision: z.string().optional().describe("Revision number"),
+  contractor: z.string().nullable().describe("Contractor name"),
+  project: z.string().nullable().describe("Project name"),
+  submittalNumber: z.string().nullable().describe("Submittal reference number"),
+  revision: z.string().nullable().describe("Revision number"),
 
   materials: z
     .array(
       z.object({
         name: z.string(),
-        manufacturer: z.string().optional(),
-        supplier: z.string().optional(),
+        manufacturer: z.string().nullable(),
+        supplier: z.string().nullable(),
         standard: z
           .string()
-          .optional()
+          .nullable()
           .describe("Referenced standard (e.g., BS 476, ASTM C150)"),
         properties: z
-          .record(z.string(), z.string())
-          .optional()
+          .array(
+            z.object({
+              key: z.string(),
+              value: z.string(),
+            })
+          )
           .describe("Key properties as key-value pairs"),
       })
     )
@@ -76,9 +82,9 @@ export const SubmittalAnalysisSchema = z.object({
         actionCode: z
           .string()
           .describe("Action code: A=Approved, B=Approved as Noted, C=Revise & Resubmit, D=Rejected"),
-        authority: z.string().optional().describe("Who approved (consultant, engineer, etc.)"),
-        date: z.string().optional(),
-        notes: z.string().optional(),
+        authority: z.string().nullable().describe("Who approved (consultant, engineer, etc.)"),
+        date: z.string().nullable(),
+        notes: z.string().nullable(),
       })
     )
     .describe("Existing approval stamps or action codes found in the document"),
@@ -94,16 +100,15 @@ export const SubmittalAnalysisSchema = z.object({
           .describe("Compliance status"),
       })
     )
-    .optional()
     .describe("Document Review Sheet items if present"),
 
   certificates: z
     .array(
       z.object({
         type: z.string().describe("Certificate type (fire test, mill cert, QCDD, etc.)"),
-        issuer: z.string().optional(),
-        reference: z.string().optional(),
-        validUntil: z.string().optional(),
+        issuer: z.string().nullable(),
+        reference: z.string().nullable(),
+        validUntil: z.string().nullable(),
       })
     )
     .describe("Certificates found in the document"),
@@ -113,8 +118,8 @@ export const SubmittalAnalysisSchema = z.object({
       z.object({
         test: z.string(),
         result: z.string(),
-        requirement: z.string().optional(),
-        pass: z.boolean().optional(),
+        requirement: z.string().nullable(),
+        pass: z.boolean().nullable(),
       })
     )
     .describe("Test results found in the document"),
