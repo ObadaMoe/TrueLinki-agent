@@ -22,16 +22,16 @@ const ANALYSIS_PROMPT = `You are a construction document analyst specializing in
 - Note Arabic text content and its purpose (often QCDD certificates, project names)
 - Record DRS item statuses (Complied, Not Complied, Excluded, Noted)
 
-## CRITICAL: Scanned / Image-Based Documents
-If the document text extraction returned no content, you MUST rely on the PAGE IMAGES to extract information. Look carefully at each image for:
+## CRITICAL: Document Analysis
+The full PDF document is attached. You MUST examine every page carefully for:
 - Headers, titles, logos, and project names
 - Tables with material properties or test results
 - Stamps, signatures, approval marks, and action codes
 - Certificate headers and reference numbers
-- Any visible text in the scanned images (even partial)
+- Any visible text (even partial or in scanned images)
 - Drawing title blocks with material specifications
 - Arabic text that identifies authorities or certifications
-DO NOT return empty or generic results — always attempt to extract whatever is visible in the images.
+DO NOT return empty or generic results — always attempt to extract whatever is visible in the document.
 
 ## Suggested QCS Queries
 Based on the materials and specifications found, suggest specific search queries that would retrieve the most relevant QCS 2024 sections. Be specific — e.g., "fire rated steel doors BS 476 requirements" rather than just "steel doors".
@@ -159,53 +159,23 @@ export type SubmittalAnalysis = z.infer<typeof SubmittalAnalysisSchema>;
 export async function analyzeSubmittalContent(
   extraction: PDFExtractionResult
 ): Promise<SubmittalAnalysis> {
-  // Build multi-modal content: text + page images
-  // AI SDK v6 uses FilePart ({ type: "file", data, mediaType }) for images, not ImagePart
+  // Send the raw PDF directly to Gemini which handles all PDF types natively
+  // (text-based, scanned, and mixed documents)
   const contentParts: Array<
     | { type: "text"; text: string }
     | { type: "file"; data: string; mediaType: string }
-  > = [];
-
-  // Add extracted text
-  contentParts.push({
-    type: "text",
-    text: `DOCUMENT: "${extraction.filename ?? "submittal.pdf"}" (${extraction.totalPages} pages)\n\nEXTRACTED TEXT:\n${extraction.rawText}`,
-  });
-
-  // For scanned PDFs, send the raw PDF directly to GPT-4o (native PDF support).
-  // For text-based PDFs, send rendered page images for visual context.
-  if (extraction.isScanned && extraction.pdfBase64) {
-    contentParts.push({
+  > = [
+    {
       type: "text",
-      text: `\n[Attached: Full PDF document for visual analysis — ${extraction.totalPages} pages]`,
-    });
-    contentParts.push({
+      text: `DOCUMENT: "${extraction.filename ?? "submittal.pdf"}"\n\nPlease extract and analyze all text, tables, images, stamps, and certificates from the attached PDF.`,
+    },
+    {
       type: "file",
       data: extraction.pdfBase64,
       mediaType: "application/pdf",
-    });
-  } else {
-    for (const page of extraction.pages) {
-      if (page.imageDataUrl) {
-        contentParts.push({
-          type: "text",
-          text: `\n--- PAGE ${page.pageNumber} IMAGE (visual scan) ---`,
-        });
-        const mediaType = page.imageMediaType ?? "image/png";
-        const base64Data = page.imageDataUrl.replace(
-          /^data:image\/[a-z]+;base64,/,
-          ""
-        );
-        contentParts.push({
-          type: "file",
-          data: base64Data,
-          mediaType,
-        });
-      }
-    }
-  }
+    },
+  ];
 
-  // Gemini 2.0 Flash handles both vision (scanned PDFs) and text extraction well
   const { object } = await generateObject({
     model: google("gemini-2.5-flash"),
     schema: SubmittalAnalysisSchema,
