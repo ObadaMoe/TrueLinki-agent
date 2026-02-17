@@ -1,5 +1,5 @@
 import { generateObject } from "ai";
-import { openai } from "@ai-sdk/openai";
+import { google } from "@ai-sdk/google";
 import { z } from "zod";
 import type { PDFExtractionResult } from "./pdf-extract";
 
@@ -205,11 +205,9 @@ export async function analyzeSubmittalContent(
     }
   }
 
-  // Use gpt-4o for scanned PDFs (needs vision), gpt-4o-mini for text-based (faster & cheaper)
-  const modelId = extraction.isScanned ? "gpt-4o" : "gpt-4o-mini";
-
+  // Gemini 2.0 Flash handles both vision (scanned PDFs) and text extraction well
   const { object } = await generateObject({
-    model: openai(modelId),
+    model: google("gemini-2.0-flash"),
     schema: SubmittalAnalysisSchema,
     system: ANALYSIS_PROMPT,
     messages: [{ role: "user", content: contentParts }],

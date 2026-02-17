@@ -6,7 +6,7 @@ import {
   type UIMessage,
   type ModelMessage,
 } from "ai";
-import { openai } from "@ai-sdk/openai";
+import { google } from "@ai-sdk/google";
 import { z } from "zod";
 import { searchQCS, hybridSearch } from "@/lib/vector-store";
 import { extractPDF, type PDFExtractionResult } from "@/lib/pdf-extract";
@@ -188,7 +188,7 @@ export async function POST(req: Request) {
 
   // --- Stream with enhanced tools ---
   const result = streamText({
-    model: openai("gpt-4o"),
+    model: google("gemini-2.0-flash"),
     system: SYSTEM_PROMPT,
     messages: modelMessages,
     stopWhen: stepCountIs(8),
@@ -223,7 +223,7 @@ export async function POST(req: Request) {
             console.error("Submittal analysis failed:", msg);
             // Return a partial result so the LLM can still attempt a review
             return {
-              error: `Analysis failed: ${msg.includes("rate_limit") ? "OpenAI rate limit exceeded. The document may be too large." : msg}`,
+              error: `Analysis failed: ${msg.includes("rate_limit") || msg.includes("RATE_LIMIT") ? "API rate limit exceeded. The document may be too large." : msg}`,
               documentType: "other",
               title: pdfExtraction.filename ?? "submittal.pdf",
               pageCount: pdfExtraction.totalPages,
