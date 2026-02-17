@@ -71,6 +71,7 @@ import {
   MenuIcon,
   NetworkIcon,
   DatabaseIcon,
+  LoaderIcon,
 } from "lucide-react";
 
 const BRAND_LOGO_SRC = "/cb.svg";
@@ -735,7 +736,25 @@ export default function Home() {
                 </div>
               </div>
             ) : (
-              <ChatMessages messages={messages} status={status} />
+              <>
+                <ChatMessages messages={messages} status={status} />
+                {status === "submitted" && (
+                  <Message from="assistant">
+                    <MessageContent>
+                      <div className="flex items-center gap-2.5">
+                        <LoaderIcon className="h-4 w-4 animate-spin text-muted-foreground" />
+                        <Shimmer className="w-full">
+                          {messages[messages.length - 1]?.parts?.some(
+                            (p) => p.type === "file"
+                          )
+                            ? "Processing document..."
+                            : "Thinking..."}
+                        </Shimmer>
+                      </div>
+                    </MessageContent>
+                  </Message>
+                )}
+              </>
             )}
           </ConversationContent>
           <ConversationScrollButton />
