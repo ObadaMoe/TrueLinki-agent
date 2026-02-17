@@ -179,21 +179,22 @@ export async function analyzeSubmittalContent(
         type: "text",
         text: `\n--- PAGE ${page.pageNumber} IMAGE (visual scan) ---`,
       });
-      // Extract base64 data from data URL (strip "data:image/png;base64," prefix)
+      // Extract base64 data from data URL (strip "data:<mediaType>;base64," prefix)
+      const mediaType = page.imageMediaType ?? "image/png";
       const base64Data = page.imageDataUrl.replace(
-        /^data:image\/png;base64,/,
+        /^data:image\/[a-z]+;base64,/,
         ""
       );
       contentParts.push({
         type: "file",
         data: base64Data,
-        mediaType: "image/png",
+        mediaType,
       });
     }
   }
 
   const { object } = await generateObject({
-    model: openai("gpt-4o"),
+    model: openai("gpt-4o-mini"),
     schema: SubmittalAnalysisSchema,
     system: ANALYSIS_PROMPT,
     messages: [{ role: "user", content: contentParts }],

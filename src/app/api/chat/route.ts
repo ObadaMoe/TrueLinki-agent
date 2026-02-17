@@ -109,33 +109,15 @@ function injectPDFContent(
       "mediaType" in part &&
       (part as any).mediaType === "application/pdf"
     ) {
-      // Replace raw PDF with extracted text
+      // Replace raw PDF with extracted text only — images are handled by
+      // the analyzeSubmittal tool to avoid sending them twice
       newContent.push({
         type: "text",
         text:
           `[PDF Document: "${extraction.filename ?? "submittal.pdf"}" — ${extraction.totalPages} pages]\n\n` +
-          `EXTRACTED TEXT:\n${extraction.rawText}`,
+          `EXTRACTED TEXT:\n${extraction.rawText}\n\n` +
+          `[Page images are available via the analyzeSubmittal tool — call it to analyze document visuals.]`,
       });
-
-      // Add page images as FilePart (AI SDK v6 uses type:"file" with mediaType for images)
-      for (const page of extraction.pages) {
-        if (page.imageDataUrl) {
-          newContent.push({
-            type: "text",
-            text: `\n[Page ${page.pageNumber} image scan:]`,
-          });
-          // Extract base64 data from data URL (strip "data:image/png;base64," prefix)
-          const base64Data = page.imageDataUrl.replace(
-            /^data:image\/png;base64,/,
-            ""
-          );
-          newContent.push({
-            type: "file",
-            data: base64Data,
-            mediaType: "image/png",
-          });
-        }
-      }
     } else {
       newContent.push(part as any);
     }
@@ -168,8 +150,9 @@ export async function POST(req: Request) {
       ) {
         try {
           pdfExtraction = await extractPDF((part as any).url, {
-            maxImagePages: 15,
-            imageScale: 2.0,
+            maxImagePages: 10,
+            imageScale: 1.5,
+            imageFormat: "jpeg",
             filename: (part as any).filename,
           });
         } catch (err) {

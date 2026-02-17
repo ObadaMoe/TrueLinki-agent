@@ -4,6 +4,7 @@ export interface ExtractedPage {
   pageNumber: number;
   text: string;
   imageDataUrl?: string;
+  imageMediaType?: string;
 }
 
 export interface PDFExtractionResult {
@@ -86,14 +87,15 @@ function selectPagesForImages(
 }
 
 /**
- * Render a single PDF page to a PNG data URL using pdfjs-dist
- * with @napi-rs/canvas.
+ * Render a single PDF page to a data URL using pdfjs-dist
+ * with @napi-rs/canvas. Supports PNG or JPEG output.
  */
 async function renderPage(
   pdf: any,
   pageNum: number,
-  scale: number
-): Promise<string> {
+  scale: number,
+  format: "png" | "jpeg" = "jpeg"
+): Promise<{ dataUrl: string; mediaType: string }> {
   const page = await pdf.getPage(pageNum);
   const viewport = page.getViewport({ scale });
 
@@ -102,8 +104,16 @@ async function renderPage(
   const canvas = createCanvas(width, height);
   const ctx = canvas.getContext("2d");
 
+  // Fill white background for JPEG (no transparency)
+  if (format === "jpeg") {
+    ctx.fillStyle = "#FFFFFF";
+    ctx.fillRect(0, 0, width, height);
+  }
+
   await page.render({ canvasContext: ctx, viewport }).promise;
-  return canvas.toDataURL("image/png");
+  const mimeType = format === "jpeg" ? "image/jpeg" : "image/png";
+  const dataUrl = canvas.toDataURL(mimeType, format === "jpeg" ? 0.75 : undefined);
+  return { dataUrl, mediaType: mimeType };
 }
 
 /**
@@ -163,11 +173,13 @@ export async function extractPDF(
   options?: {
     maxImagePages?: number;
     imageScale?: number;
+    imageFormat?: "png" | "jpeg";
     filename?: string;
   }
 ): Promise<PDFExtractionResult> {
   const maxImagePages = options?.maxImagePages ?? 10;
   const imageScale = options?.imageScale ?? 1.5;
+  const imageFormat = options?.imageFormat ?? "jpeg";
   const filename = options?.filename;
 
   // Parse data URL to Uint8Array
@@ -195,11 +207,11 @@ export async function extractPDF(
   );
 
   // Render selected pages as images
-  const imageMap = new Map<number, string>();
+  const imageMap = new Map<number, { dataUrl: string; mediaType: string }>();
   for (const pageNum of imagePagesNumbers) {
     try {
-      const imgDataUrl = await renderPage(pdf, pageNum, imageScale);
-      imageMap.set(pageNum, imgDataUrl);
+      const result = await renderPage(pdf, pageNum, imageScale, imageFormat);
+      imageMap.set(pageNum, result);
     } catch (err) {
       console.warn(`Failed to render page ${pageNum} as image:`, err);
     }
@@ -208,11 +220,15 @@ export async function extractPDF(
   pdf.destroy();
 
   // Build pages array
-  const pages: ExtractedPage[] = pageTexts.map((text, idx) => ({
-    pageNumber: idx + 1,
-    text,
-    imageDataUrl: imageMap.get(idx + 1),
-  }));
+  const pages: ExtractedPage[] = pageTexts.map((text, idx) => {
+    const img = imageMap.get(idx + 1);
+    return {
+      pageNumber: idx + 1,
+      text,
+      imageDataUrl: img?.dataUrl,
+      imageMediaType: img?.mediaType,
+    };
+  });
 
   // Build raw text
   let rawText: string;
